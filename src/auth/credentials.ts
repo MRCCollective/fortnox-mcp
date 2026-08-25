@@ -50,9 +50,14 @@ export function hasFortnoxCredentials(): boolean {
  * Fortnox OAuth scopes required by this MCP server
  */
 export const FORTNOX_SCOPES = [
+  "bookkeeping",
   "companyinformation",
+  "costcenter",
   "customer",
   "invoice",
+  "offer",
+  "order",
+  "project",
   "supplier",
-  "bookkeeping"
+  "supplierinvoice"
 ];

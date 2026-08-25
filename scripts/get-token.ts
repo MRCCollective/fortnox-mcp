@@ -16,6 +16,7 @@
 import http from "http";
 import { URL } from "url";
 import readline from "readline";
+import { FORTNOX_SCOPES } from "../src/auth/credentials.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -31,14 +32,6 @@ const CLIENT_ID = requireEnv("FORTNOX_CLIENT_ID");
 const CLIENT_SECRET = requireEnv("FORTNOX_CLIENT_SECRET");
 const REDIRECT_PORT = 8888;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
-
-const SCOPES = [
-  "customer",
-  "invoice",
-  "supplier",
-  "bookkeeping",
-  "companyinformation"
-];
 
 async function getAuthorizationCode(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -78,7 +71,7 @@ async function getAuthorizationCode(): Promise<string> {
       const authUrl = new URL("https://apps.fortnox.se/oauth-v1/auth");
       authUrl.searchParams.set("client_id", CLIENT_ID);
       authUrl.searchParams.set("redirect_uri", REDIRECT_URI);
-      authUrl.searchParams.set("scope", SCOPES.join(" "));
+      authUrl.searchParams.set("scope", FORTNOX_SCOPES.join(" "));
       authUrl.searchParams.set("response_type", "code");
       authUrl.searchParams.set("access_type", "offline");
       authUrl.searchParams.set("state", "fortnox-mcp");

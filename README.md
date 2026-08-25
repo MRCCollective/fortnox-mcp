@@ -223,6 +223,10 @@ Set `MCP_ACCESS_MODE=read-write` to expose the full tool set. This is the defaul
 3. Complete the OAuth2 authorization flow to obtain a refresh token
 4. Set the environment variables
 
+Select these Fortnox permissions: **Bokföring, Företagsinformation, Kostnadsställe, Kund, Faktura, Offert, Order, Projekt, Leverantör, and Leverantörsfaktura**. Fortnox resource scopes grant both read and write access; `MCP_ACCESS_MODE=read-only` is enforced by this server rather than by Fortnox. See [`fortnox_docs/oauth-permissions.md`](fortnox_docs/oauth-permissions.md) for the endpoint mapping and redirect details.
+
+For remote mode, register `<SERVER_URL>/oauth/fortnox/callback` as the redirect URI. The URI must match exactly.
+
 ## Usage
 
 ### With Claude Desktop

@@ -69,6 +69,7 @@ Do not run `npm run release*` during normal development. `scripts/release.sh` ch
 - This is native ESM (`"type": "module"`, Node16 resolution). Relative TypeScript imports must include the emitted `.js` extension, for example `../services/api.js`.
 - Use lower-camel-case domain filenames such as `supplierInvoices.ts` and `biAnalytics.ts`; exported registration functions follow `register<Domain>Tools`.
 - Name MCP tools `fortnox_<verb>_<noun>`. Supply `title`, detailed `description`, `inputSchema`, and all four MCP annotations: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `readOnlyHint` is security-relevant: only tools explicitly marked `true` are exposed in read-only mode.
+- When adding an endpoint family, update `FORTNOX_SCOPES` in `src/auth/credentials.ts` and the portal mapping in `fortnox_docs/oauth-permissions.md`; the hosted and local-helper OAuth flows share this list.
 - Define inputs with `z.object(...).strict()`. Give every field a useful `.describe()` because descriptions are part of the MCP client interface. Export the inferred `<Operation>Input` type.
 - Keep Fortnox wire shapes local to the relevant tool file: raw API fields are PascalCase; public structured output is normalized to snake_case with explicit `null` values where appropriate.
 - Tool handlers are `async`, validate through the registered schema, await service calls, build a stable `output` object, select Markdown or JSON via `response_format`, then return `buildToolResponse(text, output)`.
@@ -91,6 +92,8 @@ Do not run `npm run release*` during normal development. `scripts/release.sh` ch
 - `src/services/api.ts`: centralized Fortnox request, rate-limit, pagination, and API-error behavior.
 - `src/services/formatters.ts`: canonical MCP success/error envelopes and response truncation.
 - `src/auth/types.ts`, `src/auth/index.ts`, `src/auth/context.ts`: auth contracts, provider injection, and tenant propagation.
+- `src/auth/credentials.ts`: Fortnox client credentials and the authoritative requested resource-scope list.
+- `fortnox_docs/oauth-permissions.md`: portal checkbox, endpoint-family, and redirect mapping.
 - `server.json`: MCP Registry manifest. Keep its version aligned with `package.json`.
 - `vercel.json`: Vercel build, rewrite, and CORS configuration.
 - `README.md`: supported tools, environment variables, deployment, OAuth, and release procedures.
