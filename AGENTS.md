@@ -94,6 +94,7 @@ Do not run `npm run release*` during normal development. `scripts/release.sh` ch
 - `src/auth/types.ts`, `src/auth/index.ts`, `src/auth/context.ts`: auth contracts, provider injection, and tenant propagation.
 - `src/auth/credentials.ts`: Fortnox client credentials and the authoritative requested resource-scope list.
 - `fortnox_docs/oauth-permissions.md`: portal checkbox, endpoint-family, and redirect mapping.
+- `fortnox_docs/desktop-clients.md`: Claude and ChatGPT remote-connector setup and platform limitations.
 - `server.json`: MCP Registry manifest. Keep its version aligned with `package.json`.
 - `vercel.json`: Vercel build, rewrite, and CORS configuration.
 - `README.md`: supported tools, environment variables, deployment, OAuth, and release procedures.

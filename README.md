@@ -233,6 +233,8 @@ For remote mode, register `<SERVER_URL>/oauth/fortnox/callback` as the redirect 
 
 See [Quick Start](#quick-start-claude-desktop) above.
 
+For the hosted remote server, including Claude custom connectors and ChatGPT Developer mode, see [`fortnox_docs/desktop-clients.md`](fortnox_docs/desktop-clients.md). ChatGPT's official custom MCP workflow is currently web-only.
+
 ### As HTTP Server
 
 ```bash

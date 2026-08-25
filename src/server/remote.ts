@@ -53,8 +53,8 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
       provider: oauthProvider,
       issuerUrl: new URL(serverUrl),
       scopesSupported: accessMode === MCP_ACCESS_MODES.READ_ONLY
-        ? ["fortnox:read"]
-        : ["fortnox:read", "fortnox:write"],
+        ? ["fortnox:read", "offline_access"]
+        : ["fortnox:read", "fortnox:write", "offline_access"],
       resourceName: "Fortnox MCP Server",
     })
   );
