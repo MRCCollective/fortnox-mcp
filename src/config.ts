@@ -1,9 +1,12 @@
+import { getMcpAccessMode, type McpAccessMode } from "./accessMode.js";
+
 export type AuthMode = "local" | "remote";
 export type TransportMode = "stdio" | "http";
 
 export interface ServerConfig {
   authMode: AuthMode;
   transport: TransportMode;
+  accessMode: McpAccessMode;
   serverUrl?: string;
   jwtSecret?: string;
   port: number;
@@ -13,10 +16,12 @@ export function loadConfig(): ServerConfig {
   const authMode = (process.env.AUTH_MODE as AuthMode) || "local";
   const transport = (process.env.TRANSPORT as TransportMode) || "stdio";
   const port = parseInt(process.env.PORT || "3000", 10);
+  const accessMode = getMcpAccessMode();
 
   const config: ServerConfig = {
     authMode,
     transport,
+    accessMode,
     port,
   };
 

@@ -14,6 +14,7 @@
  *   - FORTNOX_REFRESH_TOKEN: User's OAuth2 refresh token
  *   - TRANSPORT: 'stdio' (default) or 'http'
  *   - PORT: HTTP server port (default: 3000)
+ *   - MCP_ACCESS_MODE: 'read-only' or 'read-write' (default: 'read-write')
  *
  * REMOTE MODE (AUTH_MODE=remote):
  *   Hosted server with OAuth flow
@@ -22,9 +23,9 @@
  *   - JWT_SECRET: Secret for signing JWT tokens
  *   - UPSTASH_REDIS_REST_URL: Redis URL for token storage
  *   - UPSTASH_REDIS_REST_TOKEN: Redis token
+ *   - MCP_ACCESS_MODE: 'read-only' or 'read-write' (default: 'read-write')
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
@@ -33,38 +34,10 @@ import { loadConfig, validateEnvironment, logConfig } from "./config.js";
 import { getFortnoxAuth } from "./services/auth.js";
 import { getStorageFromEnv } from "./auth/storage/index.js";
 import { runRemoteServer } from "./server/remote.js";
-import { registerCustomerTools } from "./tools/customers.js";
-import { registerInvoiceTools } from "./tools/invoices.js";
-import { registerSupplierTools } from "./tools/suppliers.js";
-import { registerAccountTools } from "./tools/accounts.js";
-import { registerVoucherTools } from "./tools/vouchers.js";
-import { registerCompanyTools } from "./tools/company.js";
-import { registerAnalyticsTools } from "./tools/analytics.js";
-import { registerSupplierInvoiceTools } from "./tools/supplierInvoices.js";
-import { registerOrderTools } from "./tools/orders.js";
-import { registerBIAnalyticsTools } from "./tools/biAnalytics.js";
+import { createFortnoxMcpServer } from "./server/mcpServer.js";
+import type { McpAccessMode } from "./accessMode.js";
 
-function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: "fortnox-mcp-server",
-    version: "1.0.0"
-  });
-
-  registerCustomerTools(server);
-  registerInvoiceTools(server);
-  registerSupplierTools(server);
-  registerSupplierInvoiceTools(server);
-  registerAccountTools(server);
-  registerVoucherTools(server);
-  registerCompanyTools(server);
-  registerAnalyticsTools(server);
-  registerOrderTools(server);
-  registerBIAnalyticsTools(server);
-
-  return server;
-}
-
-async function runStdio(): Promise<void> {
+async function runStdio(accessMode: McpAccessMode): Promise<void> {
   try {
     const auth = getFortnoxAuth();
     if (!auth.isAuthenticated()) {
@@ -75,12 +48,12 @@ async function runStdio(): Promise<void> {
     process.exit(1);
   }
 
-  const server = createMcpServer();
+  const server = createFortnoxMcpServer(accessMode);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-async function runLocalHTTP(): Promise<void> {
+async function runLocalHTTP(accessMode: McpAccessMode): Promise<void> {
   try {
     const auth = getFortnoxAuth();
     if (!auth.isAuthenticated()) {
@@ -91,13 +64,18 @@ async function runLocalHTTP(): Promise<void> {
     process.exit(1);
   }
 
-  const server = createMcpServer();
+  const server = createFortnoxMcpServer(accessMode);
   const app = express();
   app.use(express.json());
 
   // Health check endpoint
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", server: "fortnox-mcp-server", mode: "local-http" });
+    res.json({
+      status: "ok",
+      server: "fortnox-mcp-server",
+      mode: "local-http",
+      accessMode,
+    });
   });
 
   // MCP endpoint
@@ -116,7 +94,7 @@ async function runLocalHTTP(): Promise<void> {
 
   const port = parseInt(process.env.PORT || "3000", 10);
   app.listen(port, () => {
-    console.error(`[FortnoxMCP] http://localhost:${port}/mcp`);
+    console.error(`[FortnoxMCP] http://localhost:${port}/mcp (${accessMode})`);
   });
 }
 
@@ -133,14 +111,15 @@ async function main(): Promise<void> {
         serverUrl: config.serverUrl!,
         jwtSecret: config.jwtSecret!,
         tokenStorage,
+        accessMode: config.accessMode,
         port: config.port,
       });
     } else if (config.transport === "http") {
       // Local HTTP mode (no OAuth, uses env vars)
-      await runLocalHTTP();
+      await runLocalHTTP(config.accessMode);
     } else {
       // Local stdio mode (default)
-      await runStdio();
+      await runStdio(config.accessMode);
     }
   } catch (error) {
     console.error("Server error:", error);

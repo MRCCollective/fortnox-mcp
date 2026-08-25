@@ -1,5 +1,4 @@
 import express, { Express, Request, Response, NextFunction } from "express";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -10,27 +9,20 @@ import {
   initializeTokenProvider,
 } from "../auth/index.js";
 import { runWithContext } from "../auth/context.js";
-import { registerCustomerTools } from "../tools/customers.js";
-import { registerInvoiceTools } from "../tools/invoices.js";
-import { registerSupplierTools } from "../tools/suppliers.js";
-import { registerSupplierInvoiceTools } from "../tools/supplierInvoices.js";
-import { registerAccountTools } from "../tools/accounts.js";
-import { registerVoucherTools } from "../tools/vouchers.js";
-import { registerCompanyTools } from "../tools/company.js";
-import { registerAnalyticsTools } from "../tools/analytics.js";
-import { registerOrderTools } from "../tools/orders.js";
-import { registerBIAnalyticsTools } from "../tools/biAnalytics.js";
-import { ITokenStorage } from "../auth/storage/types.js";
+import { createFortnoxMcpServer } from "./mcpServer.js";
+import { MCP_ACCESS_MODES, type McpAccessMode } from "../accessMode.js";
+import type { ITokenStorage } from "../auth/storage/types.js";
 
 export interface RemoteServerOptions {
   serverUrl: string;
   jwtSecret: string;
   tokenStorage: ITokenStorage;
+  accessMode: McpAccessMode;
   port?: number;
 }
 
 export function createRemoteServer(options: RemoteServerOptions): Express {
-  const { serverUrl, jwtSecret, tokenStorage } = options;
+  const { serverUrl, jwtSecret, tokenStorage, accessMode } = options;
 
   const oauthProvider = new FortnoxProxyOAuthProvider(
     jwtSecret,
@@ -52,6 +44,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
       status: "ok",
       server: "fortnox-mcp-server",
       mode: "remote",
+      accessMode,
     });
   });
 
@@ -59,7 +52,9 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     mcpAuthRouter({
       provider: oauthProvider,
       issuerUrl: new URL(serverUrl),
-      scopesSupported: ["fortnox:read", "fortnox:write"],
+      scopesSupported: accessMode === MCP_ACCESS_MODES.READ_ONLY
+        ? ["fortnox:read"]
+        : ["fortnox:read", "fortnox:write"],
       resourceName: "Fortnox MCP Server",
     })
   );
@@ -99,21 +94,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     }
   });
 
-  const mcpServer = new McpServer({
-    name: "fortnox-mcp-server",
-    version: "1.0.0",
-  });
-
-  registerCustomerTools(mcpServer);
-  registerInvoiceTools(mcpServer);
-  registerSupplierTools(mcpServer);
-  registerSupplierInvoiceTools(mcpServer);
-  registerAccountTools(mcpServer);
-  registerVoucherTools(mcpServer);
-  registerCompanyTools(mcpServer);
-  registerAnalyticsTools(mcpServer);
-  registerOrderTools(mcpServer);
-  registerBIAnalyticsTools(mcpServer);
+  const mcpServer = createFortnoxMcpServer(accessMode);
 
   // Protected MCP endpoint
   app.post(
@@ -163,6 +144,8 @@ export async function runRemoteServer(options: RemoteServerOptions): Promise<voi
   const port = options.port || parseInt(process.env.PORT || "3000", 10);
 
   app.listen(port, () => {
-    console.error(`[FortnoxMCP] Remote server: http://localhost:${port}`);
+    console.error(
+      `[FortnoxMCP] Remote server: http://localhost:${port} (${options.accessMode})`
+    );
   });
 }

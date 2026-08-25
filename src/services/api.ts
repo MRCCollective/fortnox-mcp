@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import { getTokenProvider } from "../auth/index.js";
 import { getCurrentUserId } from "../auth/context.js";
+import { assertFortnoxRequestAllowed } from "../accessMode.js";
 import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
@@ -51,6 +52,7 @@ export async function fortnoxRequest<T>(
   data?: unknown,
   params?: Record<string, string | number | boolean | undefined>
 ): Promise<T> {
+  assertFortnoxRequestAllowed(method);
   await waitForRateLimit();
 
   // Get access token using the token provider

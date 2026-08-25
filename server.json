@@ -36,6 +36,13 @@
           "isRequired": true,
           "format": "string",
           "isSecret": true
+        },
+        {
+          "name": "MCP_ACCESS_MODE",
+          "description": "Tool access policy: read-only or read-write (default: read-write)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }

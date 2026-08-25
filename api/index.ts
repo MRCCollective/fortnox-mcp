@@ -3,6 +3,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createRemoteServer } from "../src/server/remote.js";
 import { getStorageFromEnv } from "../src/auth/storage/index.js";
+import { getMcpAccessMode } from "../src/accessMode.js";
 
 function validateEnv(): void {
   const required = ["SERVER_URL", "JWT_SECRET"];
@@ -24,6 +25,7 @@ function getApp() {
       serverUrl: process.env.SERVER_URL!,
       jwtSecret: process.env.JWT_SECRET!,
       tokenStorage,
+      accessMode: getMcpAccessMode(),
     });
   }
   return app;

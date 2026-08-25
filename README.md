@@ -192,6 +192,7 @@ npm run build
 | `FORTNOX_ACCESS_TOKEN` | No | Current access token (auto-refreshed) |
 | `TRANSPORT` | No | `stdio` (default) or `http` |
 | `PORT` | No | HTTP port (default: 3000) |
+| `MCP_ACCESS_MODE` | No | `read-only` or `read-write` (default: `read-write`) |
 
 #### Remote Mode (AUTH_MODE=remote)
 
@@ -205,8 +206,15 @@ npm run build
 | `UPSTASH_REDIS_REST_URL` | Yes* | Upstash Redis URL for token storage |
 | `UPSTASH_REDIS_REST_TOKEN` | Yes* | Upstash Redis token |
 | `PORT` | No | HTTP port (default: 3000) |
+| `MCP_ACCESS_MODE` | No | `read-only` or `read-write` (default: `read-write`) |
 
 *Falls back to in-memory storage if not provided (not recommended for production)
+
+### Read-only Mode
+
+Set `MCP_ACCESS_MODE=read-only` to prevent the server from changing Fortnox data. In this mode, write-capable tools are omitted from MCP tool discovery and direct `POST`, `PUT`, and `DELETE` requests through the Fortnox request gateway are blocked. Only tools explicitly annotated with `readOnlyHint: true` remain available.
+
+Set `MCP_ACCESS_MODE=read-write` to expose the full tool set. This is the default for backward compatibility. Any other value fails startup instead of silently enabling writes. Restart or redeploy the server after changing the variable.
 
 ### Getting OAuth Credentials
 
@@ -360,6 +368,34 @@ When you publish a new version, users running `npx -y fortnox-mcp-server` will a
 
 Want to host your own instance of the Fortnox MCP server? Follow these instructions.
 
+### Deploy to Coolify
+
+Create a Node.js/Nixpacks application from this repository and use:
+
+| Setting | Value |
+|---------|-------|
+| Install command | `npm ci` |
+| Build command | `npm run build` |
+| Start command | `npm start` |
+| Port | `3000` (or the value of `PORT`) |
+| Health check | `/health` |
+
+For a hosted OAuth server, configure at least:
+
+```env
+AUTH_MODE=remote
+SERVER_URL=https://fortnox-mcp.example.com
+JWT_SECRET=<random-secret>
+FORTNOX_CLIENT_ID=<client-id>
+FORTNOX_CLIENT_SECRET=<client-secret>
+MCP_ACCESS_MODE=read-only
+PORT=3000
+```
+
+Use `MCP_ACCESS_MODE=read-write` only when the deployment should expose mutation tools. The `/health` response reports the active `accessMode`.
+
+Configure the Fortnox callback as `https://fortnox-mcp.example.com/oauth/fortnox/callback`. For persistent remote tokens, also set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. A standard Redis TCP service is not accepted by the current Upstash REST storage adapter; without the Upstash variables, tokens are held in memory and are lost on restart.
+
 ### Deploy to Vercel
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/jakobwennberg/fortnox-mcp)
@@ -383,6 +419,7 @@ In your Vercel project settings, add these environment variables:
 | `FORTNOX_CLIENT_SECRET` | Your Fortnox app client secret |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token |
+| `MCP_ACCESS_MODE` | `read-only` or `read-write` (default: `read-write`) |
 
 #### 3. Configure Fortnox OAuth Callback
 
