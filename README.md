@@ -203,12 +203,15 @@ npm run build
 | `JWT_SECRET` | Yes | Secret for signing JWT tokens |
 | `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
 | `FORTNOX_CLIENT_SECRET` | Yes | Your Fortnox app client secret |
-| `UPSTASH_REDIS_REST_URL` | Yes* | Upstash Redis URL for token storage |
-| `UPSTASH_REDIS_REST_TOKEN` | Yes* | Upstash Redis token |
+| `UPSTASH_REDIS_REST_URL` | No* | Upstash Redis URL for token storage |
+| `UPSTASH_REDIS_REST_TOKEN` | No* | Upstash Redis token |
+| `TOKEN_STORAGE` | No | Storage backend: `file`, `upstash-redis`, or `memory` |
+| `TOKEN_FILE_DIR` | No | Directory for `TOKEN_STORAGE=file` (default: `/home/data`) |
+| `TOKEN_FILE` | No | Full path to the token file (overrides `TOKEN_FILE_DIR`) |
 | `PORT` | No | HTTP port (default: 3000) |
 | `MCP_ACCESS_MODE` | No | `read-only` or `read-write` (default: `read-write`) |
 
-*Falls back to in-memory storage if not provided (not recommended for production)
+*Storage falls back to in-memory if no backend is configured (not recommended for production). Set `TOKEN_STORAGE=file` (with `TOKEN_FILE_DIR` on a persistent volume) for a single-instance deployment, or configure Upstash for multi-instance/serverless. `TOKEN_STORAGE=file` and `TOKEN_FILE_DIR` are auto-detected when `TOKEN_STORAGE` is unset.
 
 ### Read-only Mode
 

@@ -1,5 +1,6 @@
 export * from "./types.js";
 export { MemoryTokenStorage, getMemoryStorage } from "./memory.js";
+export { FileTokenStorage } from "./file.js";
 export {
   UpstashRedisTokenStorage,
   VercelKVTokenStorage,
@@ -9,12 +10,15 @@ export {
 
 import { ITokenStorage } from "./types.js";
 import { MemoryTokenStorage } from "./memory.js";
+import { FileTokenStorage } from "./file.js";
 import { UpstashRedisTokenStorage } from "./vercelKV.js";
 
-export type StorageType = "memory" | "vercel-kv" | "upstash-redis";
+export type StorageType = "memory" | "file" | "vercel-kv" | "upstash-redis";
 
 export function createTokenStorage(type: StorageType): ITokenStorage {
   switch (type) {
+    case "file":
+      return new FileTokenStorage();
     case "vercel-kv":
     case "upstash-redis":
       return new UpstashRedisTokenStorage();
@@ -35,6 +39,10 @@ export function getStorageFromEnv(): ITokenStorage {
   // Auto-detect based on environment
   if (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL) {
     return new UpstashRedisTokenStorage();
+  }
+
+  if (process.env.TOKEN_FILE || process.env.TOKEN_FILE_DIR) {
+    return new FileTokenStorage();
   }
 
   console.error("[Storage] Warning: Using in-memory storage. Tokens will be lost on restart.");
