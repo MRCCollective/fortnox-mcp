@@ -6,8 +6,10 @@ export const FORTNOX_OAUTH_URL = "https://apps.fortnox.se/oauth-v1";
 export const RATE_LIMIT_REQUESTS = 25;
 export const RATE_LIMIT_WINDOW_MS = 5000;
 
-// Per-request timeout for Fortnox API calls
-export const FORTNOX_REQUEST_TIMEOUT_MS = 300000;
+// Global timeout for a single inbound MCP request. Kept below the Azure App
+// Service front-end request limit (~230s) so the server returns a response (or
+// a truncation result) instead of the platform terminating the connection.
+export const GLOBAL_REQUEST_TIMEOUT_MS = 200000;
 
 // Response limits
 export const CHARACTER_LIMIT = 25000;

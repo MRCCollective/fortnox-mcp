@@ -6,7 +6,7 @@ import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
   RATE_LIMIT_WINDOW_MS,
-  FORTNOX_REQUEST_TIMEOUT_MS,
+  GLOBAL_REQUEST_TIMEOUT_MS,
   MAX_FETCH_ALL_RESULTS,
   MAX_FETCH_ALL_PAGES,
   FETCH_ALL_PAGE_SIZE,
@@ -51,7 +51,8 @@ export async function fortnoxRequest<T>(
   endpoint: string,
   method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
   data?: unknown,
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<string, string | number | boolean | undefined>,
+  timeoutMs: number = GLOBAL_REQUEST_TIMEOUT_MS
 ): Promise<T> {
   assertFortnoxRequestAllowed(method);
   await waitForRateLimit();
@@ -81,7 +82,7 @@ export async function fortnoxRequest<T>(
       "Content-Type": "application/json",
       "Accept": "application/json"
     },
-    timeout: FORTNOX_REQUEST_TIMEOUT_MS,
+    timeout: timeoutMs,
     params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined,
     data
   };
@@ -257,7 +258,19 @@ export async function fetchAllPages<T, R>(
   let truncated = false;
   let truncationReason: string | undefined;
 
+  // Hard deadline for the whole pagination run so we stay under the platform
+  // request limit and return a truncated result instead of being cut off.
+  const deadline = Date.now() + GLOBAL_REQUEST_TIMEOUT_MS;
+
   while (hasMore) {
+    // Check global time limit
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      truncated = true;
+      truncationReason = `Reached global time limit (${Math.round(GLOBAL_REQUEST_TIMEOUT_MS / 1000)}s). Use filters to narrow results.`;
+      break;
+    }
+
     // Check page limit
     if (page > maxPages) {
       truncated = true;
@@ -272,12 +285,18 @@ export async function fetchAllPages<T, R>(
       break;
     }
 
-    // Make request
-    const response = await fortnoxRequest<R>(endpoint, "GET", undefined, {
-      ...params,
-      limit: pageSize,
-      page
-    });
+    // Make request, capping the per-request timeout at the remaining budget
+    const response = await fortnoxRequest<R>(
+      endpoint,
+      "GET",
+      undefined,
+      {
+        ...params,
+        limit: pageSize,
+        page
+      },
+      Math.max(1000, remainingMs)
+    );
 
     const items = extractItems(response);
     total = extractTotal(response);
