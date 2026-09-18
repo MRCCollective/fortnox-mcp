@@ -6,6 +6,7 @@ import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
   RATE_LIMIT_WINDOW_MS,
+  FORTNOX_REQUEST_TIMEOUT_MS,
   MAX_FETCH_ALL_RESULTS,
   MAX_FETCH_ALL_PAGES,
   FETCH_ALL_PAGE_SIZE,
@@ -80,7 +81,7 @@ export async function fortnoxRequest<T>(
       "Content-Type": "application/json",
       "Accept": "application/json"
     },
-    timeout: 30000,
+    timeout: FORTNOX_REQUEST_TIMEOUT_MS,
     params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined,
     data
   };

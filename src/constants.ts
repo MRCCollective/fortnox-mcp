@@ -6,6 +6,9 @@ export const FORTNOX_OAUTH_URL = "https://apps.fortnox.se/oauth-v1";
 export const RATE_LIMIT_REQUESTS = 25;
 export const RATE_LIMIT_WINDOW_MS = 5000;
 
+// Per-request timeout for Fortnox API calls
+export const FORTNOX_REQUEST_TIMEOUT_MS = 300000;
+
 // Response limits
 export const CHARACTER_LIMIT = 25000;
 export const DEFAULT_PAGE_SIZE = 20;
