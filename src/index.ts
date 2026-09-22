@@ -64,7 +64,6 @@ async function runLocalHTTP(accessMode: McpAccessMode): Promise<void> {
     process.exit(1);
   }
 
-  const server = createFortnoxMcpServer(accessMode);
   const app = express();
   app.use(express.json());
 
@@ -79,8 +78,15 @@ async function runLocalHTTP(accessMode: McpAccessMode): Promise<void> {
   });
 
   // MCP endpoint
+  app.get("/mcp", (_req, res) => {
+    res.set("Allow", "POST").status(405).end();
+  });
+  app.delete("/mcp", (_req, res) => {
+    res.set("Allow", "POST").status(405).end();
+  });
   app.post("/mcp", async (req, res) => {
     // Create new transport for each request (stateless)
+    const server = createFortnoxMcpServer(accessMode);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true

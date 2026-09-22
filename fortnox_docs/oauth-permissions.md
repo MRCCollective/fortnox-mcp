@@ -8,10 +8,10 @@ Remote deployments register exactly:
 <SERVER_URL>/oauth/fortnox/callback
 ```
 
-For the Devosurf deployment:
+For the MRC Azure deployment:
 
 ```text
-https://fortnox-mcp.devosurf.dev/oauth/fortnox/callback
+https://mrc-fortnox-mcp.azurewebsites.net/oauth/fortnox/callback
 ```
 
 The URI must match the Fortnox Developer Portal value exactly. `src/auth/oauthProvider.ts` builds this URI from `SERVER_URL`, and `src/server/remote.ts` serves the callback route. The separate local token helper uses `http://localhost:8888/callback`.

@@ -94,9 +94,15 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     }
   });
 
-  const mcpServer = createFortnoxMcpServer(accessMode);
-
   // Protected MCP endpoint
+  // This endpoint is stateless and does not offer a standalone event stream or
+  // client-initiated session deletion. MCP clients use 405 to recognize that.
+  app.get("/mcp", (_req, res) => {
+    res.set("Allow", "POST").status(405).end();
+  });
+  app.delete("/mcp", (_req, res) => {
+    res.set("Allow", "POST").status(405).end();
+  });
   app.post(
     "/mcp",
     requireBearerAuth({
@@ -112,6 +118,9 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
           return;
         }
 
+        // Each stateless request needs its own server and transport. A new
+        // connect() call replaces the server's active transport.
+        const mcpServer = createFortnoxMcpServer(accessMode);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
           enableJsonResponse: true,

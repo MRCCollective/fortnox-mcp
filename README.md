@@ -13,34 +13,13 @@ An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish 
 
 ## Quick Start: Remote Mode (Recommended)
 
-The easiest way to use Fortnox MCP - no credentials needed, just authorize in your browser.
+The hosted MRC deployment runs on Azure App Service. Add its public MCP endpoint to Claude and authorize Fortnox in your browser:
 
-### Option A: Add to Claude.ai (Web)
-
-1. Go to [claude.ai](https://claude.ai)
-2. Navigate to **Settings** → **Integrations** → **Add Integration**
-3. Enter the URL: `https://fortnox-mcp.vercel.app/mcp`
-4. Wait for it to load, then authorize access by clicking connect
-
-### Option B: Add to Claude Desktop
-
-Open your Claude Desktop config file:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-Add this configuration:
-
-```json
-{
-  "mcpServers": {
-    "fortnox": {
-      "url": "https://fortnox-mcp.vercel.app/mcp"
-    }
-  }
-}
+```text
+https://mrc-fortnox-mcp.azurewebsites.net/mcp
 ```
 
-Restart Claude Desktop. When you first ask Claude to do something with Fortnox, a browser window will open for you to authorize access to your Fortnox account. Once authorized, you're all set!
+In Claude web or Desktop, open **Customize → Connectors**, add a custom connector with that URL, then click **Connect** to complete Fortnox authorization. See [`fortnox_docs/desktop-clients.md`](fortnox_docs/desktop-clients.md) for account-specific steps and ChatGPT setup.
 
 ---
 
@@ -234,7 +213,7 @@ For remote mode, register `<SERVER_URL>/oauth/fortnox/callback` as the redirect 
 
 ### With Claude Desktop
 
-See [Quick Start](#quick-start-claude-desktop) above.
+See [Quick Start: Remote Mode](#quick-start-remote-mode-recommended) above.
 
 For the hosted remote server, including Claude custom connectors and ChatGPT Developer mode, see [`fortnox_docs/desktop-clients.md`](fortnox_docs/desktop-clients.md). ChatGPT's official custom MCP workflow is currently web-only.
 
@@ -403,7 +382,7 @@ PORT=3000
 
 Use `MCP_ACCESS_MODE=read-write` only when the deployment should expose mutation tools. The `/health` response reports the active `accessMode`.
 
-Configure the Fortnox callback as `https://fortnox-mcp.example.com/oauth/fortnox/callback`. For persistent remote tokens, also set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. A standard Redis TCP service is not accepted by the current Upstash REST storage adapter; without the Upstash variables, tokens are held in memory and are lost on restart.
+Configure the Fortnox callback as `https://fortnox-mcp.example.com/oauth/fortnox/callback`. For persistent remote tokens, use `TOKEN_STORAGE=file` with `TOKEN_FILE_DIR` on a persistent volume for a single-instance deployment, or set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` for multi-instance/serverless hosting. A standard Redis TCP service is not accepted by the current Upstash REST storage adapter. Without a persistent backend, tokens are held in memory and lost on restart.
 
 ### Deploy to Vercel
 
