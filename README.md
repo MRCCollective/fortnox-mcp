@@ -187,10 +187,14 @@ npm run build
 | `TOKEN_STORAGE` | No | Storage backend: `file`, `upstash-redis`, or `memory` |
 | `TOKEN_FILE_DIR` | No | Directory for `TOKEN_STORAGE=file` (default: `/home/data`) |
 | `TOKEN_FILE` | No | Full path to the token file (overrides `TOKEN_FILE_DIR`) |
+| `STATE_FILE_DIR` | No | Directory for the OAuth state file (defaults to `TOKEN_FILE_DIR`) |
+| `OAUTH_STATE_FILE` | No | Full path to the OAuth state file (overrides `STATE_FILE_DIR`) |
 | `PORT` | No | HTTP port (default: 3000) |
 | `MCP_ACCESS_MODE` | No | `read-only` or `read-write` (default: `read-write`) |
 
 *Storage falls back to in-memory if no backend is configured (not recommended for production). Set `TOKEN_STORAGE=file` (with `TOKEN_FILE_DIR` on a persistent volume) for a single-instance deployment, or configure Upstash for multi-instance/serverless. `TOKEN_STORAGE=file` and `TOKEN_FILE_DIR` are auto-detected when `TOKEN_STORAGE` is unset.
+
+When a file-backed location is configured, the OAuth authorization-server state (dynamically registered MCP clients, in-progress authorizations, issued codes, and revocations) is persisted to `oauth-state.json` in the same directory (`TOKEN_FILE_DIR`, or `STATE_FILE_DIR`/`OAUTH_STATE_FILE`). This lets connectors keep their registration across restarts instead of requiring a reconnect. Without a file location, this state stays in memory and is lost on restart.
 
 ### Read-only Mode
 

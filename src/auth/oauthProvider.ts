@@ -15,6 +15,11 @@ import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { ITokenStorage } from "./storage/types.js";
 import { DatabaseTokenProvider } from "./databaseProvider.js";
 import { FORTNOX_SCOPES } from "./credentials.js";
+import {
+  getOAuthStateFileFromEnv,
+  loadOAuthState,
+  saveOAuthState,
+} from "./oauthStateStore.js";
 
 // JWT configuration
 const JWT_ALGORITHM = "HS256";
@@ -57,10 +62,13 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
   private tokenProvider: DatabaseTokenProvider;
   private _clientsStore: InMemoryClientsStore;
 
-  // State storage (should use Redis/DB in production)
-  private pendingAuthorizations: Map<string, PendingAuthorization> = new Map();
-  private issuedCodes: Map<string, IssuedCode> = new Map();
-  private revokedTokens: Set<string> = new Set();
+  // Authorization-server state. Hydrated from disk (when a state file is
+  // configured) and written through on every change so a restart does not
+  // force MCP clients to re-register and re-authorize.
+  private pendingAuthorizations: Map<string, PendingAuthorization>;
+  private issuedCodes: Map<string, IssuedCode>;
+  private revokedTokens: Set<string>;
+  private stateFile: string | null;
 
   // Skip local PKCE validation since we handle it ourselves
   skipLocalPkceValidation = false;
@@ -68,12 +76,43 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
   constructor(
     jwtSecret: string,
     serverUrl: string,
-    tokenStorage: ITokenStorage
+    tokenStorage: ITokenStorage,
+    stateFile: string | null = getOAuthStateFileFromEnv()
   ) {
     this.jwtSecret = new TextEncoder().encode(jwtSecret);
     this.serverUrl = serverUrl;
     this.tokenProvider = new DatabaseTokenProvider(tokenStorage);
-    this._clientsStore = new InMemoryClientsStore();
+    this.stateFile = stateFile;
+
+    const persisted = stateFile ? loadOAuthState(stateFile) : null;
+    this.pendingAuthorizations = new Map(
+      Object.entries(persisted?.pendingAuthorizations ?? {}) as [
+        string,
+        PendingAuthorization,
+      ][]
+    );
+    this.issuedCodes = new Map(
+      Object.entries(persisted?.issuedCodes ?? {}) as [string, IssuedCode][]
+    );
+    this.revokedTokens = new Set(persisted?.revokedTokens ?? []);
+    this._clientsStore = new InMemoryClientsStore(
+      (persisted?.clients ?? {}) as Record<string, OAuthClientInformationFull>,
+      () => this.persist()
+    );
+  }
+
+  /**
+   * Persist all authorization-server state to disk (no-op when no state file
+   * is configured, e.g. memory-only deployments).
+   */
+  private persist(): void {
+    if (!this.stateFile) return;
+    saveOAuthState(this.stateFile, {
+      clients: this._clientsStore.toJSON(),
+      pendingAuthorizations: Object.fromEntries(this.pendingAuthorizations),
+      issuedCodes: Object.fromEntries(this.issuedCodes),
+      revokedTokens: [...this.revokedTokens],
+    });
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
@@ -102,6 +141,7 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
 
     // Clean up old pending authorizations (older than 10 minutes)
     this.cleanupPendingAuthorizations();
+    this.persist();
 
     // Redirect to Fortnox OAuth
     const fortnoxAuthUrl = this.tokenProvider.getAuthorizationUrl(
@@ -149,6 +189,7 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
 
     // Clean up old codes
     this.cleanupIssuedCodes();
+    this.persist();
 
     return {
       redirectUri: pending.mcpParams.redirectUri,
@@ -187,6 +228,7 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
 
     // Remove used code
     this.issuedCodes.delete(authorizationCode);
+    this.persist();
 
     // Check if code is expired (5 minutes)
     if (Date.now() - issued.createdAt > 5 * 60 * 1000) {
@@ -247,6 +289,7 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     request: OAuthTokenRevocationRequest
   ): Promise<void> {
     this.revokedTokens.add(request.token);
+    this.persist();
   }
 
   private async issueTokens(
@@ -348,7 +391,14 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
 
 // Dynamic client registration store
 class InMemoryClientsStore implements OAuthRegisteredClientsStore {
-  private clients: Map<string, OAuthClientInformationFull> = new Map();
+  private clients: Map<string, OAuthClientInformationFull>;
+
+  constructor(
+    initial?: Record<string, OAuthClientInformationFull>,
+    private readonly onPersist?: () => void
+  ) {
+    this.clients = new Map(Object.entries(initial ?? {}));
+  }
 
   getClient(clientId: string): OAuthClientInformationFull | undefined {
     return this.clients.get(clientId);
@@ -365,7 +415,12 @@ class InMemoryClientsStore implements OAuthRegisteredClientsStore {
     };
 
     this.clients.set(clientId, fullClient);
+    this.onPersist?.();
     return fullClient;
+  }
+
+  toJSON(): Record<string, OAuthClientInformationFull> {
+    return Object.fromEntries(this.clients);
   }
 }
 
