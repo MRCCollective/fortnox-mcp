@@ -38,6 +38,26 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
   // Trust proxy headers (for Vercel, etc.)
   app.set("trust proxy", 1);
 
+  // App Service's front end appends the source port to X-Forwarded-For entries
+  // (e.g. "203.0.113.7:5678"). Express then derives an invalid req.ip, which
+  // makes express-rate-limit log ERR_ERL_INVALID_IP_ADDRESS on every request.
+  // Strip the port so req.ip is a bare address.
+  app.use((req, _res, next) => {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (typeof forwarded === "string") {
+      req.headers["x-forwarded-for"] = forwarded
+        .split(",")
+        .map((entry) =>
+          entry
+            .trim()
+            .replace(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/, "$1")
+            .replace(/^\[([^\]]+)\]:\d+$/, "[$1]")
+        )
+        .join(", ");
+    }
+    next();
+  });
+
   // Health check endpoint (no auth required)
   app.get("/health", (_req, res) => {
     res.json({
