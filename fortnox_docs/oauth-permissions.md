@@ -18,7 +18,7 @@ The URI must match the Fortnox Developer Portal value exactly. `src/auth/oauthPr
 
 ## Required portal permissions
 
-Select these ten permissions for the current tool surface:
+Select these eight permissions for the current tool surface:
 
 | Portal permission | OAuth scope | Used for |
 |---|---|---|
@@ -27,11 +27,11 @@ Select these ten permissions for the current tool surface:
 | Kostnadsställe | `costcenter` | Cost-center analytics |
 | Kund | `customer` | Customers |
 | Faktura | `invoice` | Invoices and invoice analytics |
-| Offert | `offer` | Offers and sales-funnel analytics |
-| Order | `order` | Orders and order-pipeline analytics |
 | Projekt | `project` | Project analytics |
 | Leverantör | `supplier` | Suppliers |
 | Leverantörsfaktura | `supplierinvoice` | Supplier invoices, payables, and payment approval |
+
+`offers` and `order` are intentionally not requested. On Fortnox, the Offer and Order permissions require the Order license, and requesting the scopes without it makes Fortnox reject the whole authorization with `invalid_scope`. The tools that use `/3/offers` and `/3/orders` (`fortnox_list_offers`, `fortnox_list_orders`, `fortnox_sales_funnel`, `fortnox_order_pipeline`) therefore aren't available and will return a permission error if called. Request them again only if the company has the Order license.
 
 These scopes are defined once in `src/auth/credentials.ts` and reused by the hosted OAuth flow and `scripts/get-token.ts`.
 
@@ -39,7 +39,7 @@ Do not select unrelated permissions such as Artikel, Betalningar, Ta bort verifi
 
 ## Read-only limitation
 
-Fortnox states that every resource scope grants both read and write access; Fortnox does not issue read-only resource scopes. Therefore the Fortnox scope selection is the same for this server's `read-only` and `read-write` modes: surviving read tools use all ten resource families.
+Fortnox states that every resource scope grants both read and write access; Fortnox does not issue read-only resource scopes. Therefore the Fortnox scope selection is the same for this server's `read-only` and `read-write` modes: surviving read tools use the eight resource families above.
 
 `MCP_ACCESS_MODE=read-only` enforces read-only behavior inside this server by hiding non-read-only tools and rejecting Fortnox `POST`, `PUT`, and `DELETE` requests. It does not reduce the permissions encoded in the Fortnox access token. Treat stored Fortnox tokens as write-capable secrets.
 

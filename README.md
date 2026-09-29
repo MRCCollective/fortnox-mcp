@@ -96,8 +96,8 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 - `fortnox_payables_report` - Get accounts payable aging report
 
 ### Order Management
-- `fortnox_list_orders` - List sales orders with filtering
-- `fortnox_list_offers` - List offers/quotes with filtering
+- `fortnox_list_orders` - List sales orders with filtering (requires the Fortnox Order license; not available by default)
+- `fortnox_list_offers` - List offers/quotes with filtering (requires the Fortnox Order license; not available by default)
 
 ### Account Management
 - `fortnox_list_accounts` - List chart of accounts
@@ -209,7 +209,7 @@ Set `MCP_ACCESS_MODE=read-write` to expose the full tool set. This is the defaul
 3. Complete the OAuth2 authorization flow to obtain a refresh token
 4. Set the environment variables
 
-Select these Fortnox permissions: **Bokföring, Företagsinformation, Kostnadsställe, Kund, Faktura, Offert, Order, Projekt, Leverantör, and Leverantörsfaktura**. Fortnox resource scopes grant both read and write access; `MCP_ACCESS_MODE=read-only` is enforced by this server rather than by Fortnox. See [`fortnox_docs/oauth-permissions.md`](fortnox_docs/oauth-permissions.md) for the endpoint mapping and redirect details.
+Select these Fortnox permissions: **Bokföring, Företagsinformation, Kostnadsställe, Kund, Faktura, Projekt, Leverantör, and Leverantörsfaktura**. Do not request Offert/Order unless the company has the Fortnox Order license — without it Fortnox rejects the whole authorization with `invalid_scope`. Fortnox resource scopes grant both read and write access; `MCP_ACCESS_MODE=read-only` is enforced by this server rather than by Fortnox. See [`fortnox_docs/oauth-permissions.md`](fortnox_docs/oauth-permissions.md) for the endpoint mapping and redirect details.
 
 For remote mode, register `<SERVER_URL>/oauth/fortnox/callback` as the redirect URI. The URI must match exactly.
 
