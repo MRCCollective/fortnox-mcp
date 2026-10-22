@@ -33,6 +33,8 @@ interface FortnoxVoucherRow {
   Description?: string;
   CostCenter?: string;
   Project?: string;
+  /** True for rows corrected away after registration; they no longer affect any balance */
+  Removed?: boolean;
 }
 
 interface FortnoxVoucher {
@@ -51,6 +53,14 @@ interface FortnoxVoucherListItem {
   Description: string;
   TransactionDate: string;
   "@url"?: string;
+}
+
+/**
+ * Rows that still count in the bookkeeping. Fortnox keeps corrected rows on the
+ * voucher with Removed=true; summing them double counts the corrected amount.
+ */
+function activeRows(voucher: FortnoxVoucher): FortnoxVoucherRow[] {
+  return (voucher.VoucherRows || []).filter((row) => !row.Removed);
 }
 
 interface VoucherListResponse {
@@ -213,7 +223,15 @@ Returns:
           year: voucher.Year,
           description: voucher.Description,
           transaction_date: voucher.TransactionDate,
-          rows: (voucher.VoucherRows || []).map((row) => ({
+          rows: activeRows(voucher).map((row) => ({
+            account_number: row.Account,
+            debit: row.Debit || 0,
+            credit: row.Credit || 0,
+            description: row.Description || null,
+            cost_center: row.CostCenter || null,
+            project: row.Project || null
+          })),
+          removed_rows: (voucher.VoucherRows || []).filter((row) => row.Removed).map((row) => ({
             account_number: row.Account,
             debit: row.Debit || 0,
             credit: row.Credit || 0,
@@ -243,7 +261,7 @@ Returns:
           let totalDebit = 0;
           let totalCredit = 0;
 
-          for (const row of voucher.VoucherRows || []) {
+          for (const row of activeRows(voucher)) {
             totalDebit += row.Debit || 0;
             totalCredit += row.Credit || 0;
             lines.push(
@@ -252,6 +270,19 @@ Returns:
           }
 
           lines.push(`| **Total** | | **${formatMoney(totalDebit)}** | **${formatMoney(totalCredit)}** |`);
+
+          if (output.removed_rows.length > 0) {
+            lines.push("");
+            lines.push("## Removed Rows (corrected, not included in totals)");
+            lines.push("");
+            lines.push("| Account | Description | Debit | Credit |");
+            lines.push("|---------|-------------|-------|--------|");
+            for (const row of output.removed_rows) {
+              lines.push(
+                `| ${row.account_number} | ${row.description || "-"} | ${formatMoney(row.debit)} | ${formatMoney(row.credit)} |`
+              );
+            }
+          }
 
           textContent = lines.join("\n");
         }
@@ -598,9 +629,9 @@ Examples:
 
           // Process results
           for (const voucher of details) {
-            if (!voucher || !voucher.VoucherRows) continue;
+            if (!voucher) continue;
 
-            for (const row of voucher.VoucherRows) {
+            for (const row of activeRows(voucher)) {
               if (accountMatches(row.Account)) {
                 matchingTransactions.push({
                   voucher_series: voucher.VoucherSeries,
@@ -879,7 +910,7 @@ Examples:
               if (!voucher) continue;
 
               const descriptionMatch = textMatches(voucher.Description);
-              const rowMatch = voucher.VoucherRows?.some(row => textMatches(row.Description));
+              const rowMatch = activeRows(voucher).some(row => textMatches(row.Description));
 
               if (descriptionMatch || rowMatch) {
                 matchingVouchers.push({
@@ -888,7 +919,7 @@ Examples:
                   transaction_date: voucher.TransactionDate,
                   description: voucher.Description,
                   matched_in: descriptionMatch ? "description" : "row",
-                  rows: voucher.VoucherRows?.map(row => ({
+                  rows: activeRows(voucher).map(row => ({
                     account: row.Account,
                     description: row.Description || null,
                     debit: row.Debit || 0,

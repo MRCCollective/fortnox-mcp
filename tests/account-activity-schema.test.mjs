@@ -113,3 +113,82 @@ test("fortnox_account_activity accepts string-encoded arguments and returns cost
     await client.close();
   }
 });
+
+test("voucher tools ignore rows Fortnox marks as Removed", async () => {
+  const originalAdapter = axios.defaults.adapter;
+  // Mirrors live voucher B1998: the 3045 row was corrected to 3048 after registration
+  const voucher = {
+    VoucherSeries: "B",
+    VoucherNumber: 1998,
+    Year: 11,
+    Description: "Kundfaktura F. Initiatives SRL (6196)",
+    TransactionDate: "2026-08-03",
+    VoucherRows: [
+      { Account: 3048, Credit: 1354.95, Description: "Försäljning tjänster EU momsfri" },
+      { Account: 1683, Debit: 1354.95, CostCenter: "670", Description: "Avräkningskonto" },
+      { Account: 1510, Debit: 0, Credit: 0, Description: "Kundfordringar" },
+      { Account: 3045, Credit: 1354.95, Description: "Försälj tjänst utanför EU", Removed: true },
+      { Account: 1683, Debit: 1354.95, CostCenter: "680", Description: "Fel kostnadsställe", Removed: true },
+    ],
+  };
+  axios.defaults.adapter = async (config) => {
+    const path = new URL(config.url).pathname;
+    const respond = (data) => ({ config, status: 200, statusText: "OK", headers: {}, data });
+    if (path === "/3/vouchers") {
+      return respond({
+        Vouchers: [{ VoucherSeries: "B", VoucherNumber: 1998, Description: voucher.Description, TransactionDate: voucher.TransactionDate }],
+        MetaInformation: { "@TotalResources": 1 },
+      });
+    }
+    if (path === "/3/vouchers/B/1998") return respond({ Voucher: voucher });
+    throw new Error(`Unexpected request ${path}`);
+  };
+
+  const client = await connectClient();
+  try {
+    const activity = await client.callTool({
+      name: "fortnox_account_activity",
+      arguments: { account_numbers: [1683, 3045, 3048], financial_year: 11, max_vouchers: 10, response_format: "json" },
+    });
+    assert.notEqual(activity.isError, true, activity.content?.[0]?.text);
+    assert.deepEqual(
+      activity.structuredContent.transactions.map((t) => [t.account, t.cost_center, t.debit, t.credit]),
+      [[3048, null, 0, 1354.95], [1683, "670", 1354.95, 0]],
+    );
+    assert.deepEqual(
+      activity.structuredContent.summary.map((s) => [s.account, s.total_debit, s.total_credit]),
+      [[1683, 1354.95, 0], [3048, 0, 1354.95]],
+    );
+
+    const detail = await client.callTool({
+      name: "fortnox_get_voucher",
+      arguments: { voucher_series: "B", voucher_number: 1998, financial_year: 11, response_format: "json" },
+    });
+    assert.deepEqual(detail.structuredContent.rows.map((r) => r.account_number), [3048, 1683, 1510]);
+    assert.deepEqual(detail.structuredContent.removed_rows.map((r) => r.account_number), [3045, 1683]);
+
+    const detailMarkdown = await client.callTool({
+      name: "fortnox_get_voucher",
+      arguments: { voucher_series: "B", voucher_number: 1998, financial_year: 11 },
+    });
+    const text = detailMarkdown.content[0].text;
+    // Totals balance once removed rows are excluded
+    assert.match(text, /\| \*\*Total\*\* \| \| \*\*1\s354,95 SEK\*\* \| \*\*1\s354,95 SEK\*\* \|/);
+    assert.match(text, /## Removed Rows \(corrected, not included in totals\)/);
+
+    const search = await client.callTool({
+      name: "fortnox_search_vouchers",
+      arguments: { search_text: "Fel kostnadsställe", financial_year: 11, include_rows: true, max_vouchers: 10, response_format: "json" },
+    });
+    assert.equal(search.structuredContent.matching_count, 0);
+
+    const searchByVoucher = await client.callTool({
+      name: "fortnox_search_vouchers",
+      arguments: { search_text: "Initiatives", financial_year: 11, include_rows: true, max_vouchers: 10, response_format: "json" },
+    });
+    assert.deepEqual(searchByVoucher.structuredContent.vouchers[0].rows.map((r) => r.account), [3048, 1683, 1510]);
+  } finally {
+    axios.defaults.adapter = originalAdapter;
+    await client.close();
+  }
+});
