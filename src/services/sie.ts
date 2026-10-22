@@ -47,6 +47,8 @@ export interface SieFile {
   objects: Map<string, string>;
   /** #IB 0 opening balances for the current financial year */
   openingBalances: Map<number, number>;
+  /** #OIB 0 opening balances per account and object list (e.g. per cost center) */
+  objectOpeningBalances: Map<number, Array<{ objects: Record<string, string>; amount: number }>>;
   vouchers: SieVoucher[];
 }
 
@@ -158,6 +160,7 @@ export function parseSie(content: string): SieFile {
     accounts: new Map(),
     objects: new Map(),
     openingBalances: new Map(),
+    objectOpeningBalances: new Map(),
     vouchers: []
   };
 
@@ -199,6 +202,16 @@ export function parseSie(content: string): SieFile {
         if (tokens[1] === "0") {
           const account = Number.parseInt(tokens[2], 10);
           if (Number.isFinite(account)) file.openingBalances.set(account, sieAmount(tokens[3]));
+        }
+        break;
+      }
+      case "#OIB": {
+        if (tokens[1] === "0") {
+          const account = Number.parseInt(tokens[2], 10);
+          if (!Number.isFinite(account)) break;
+          const entries = file.objectOpeningBalances.get(account) || [];
+          entries.push({ objects: parseSieObjectList(tokens[3]), amount: sieAmount(tokens[4]) });
+          file.objectOpeningBalances.set(account, entries);
         }
         break;
       }

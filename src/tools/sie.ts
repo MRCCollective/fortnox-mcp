@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fortnoxRequest } from "../services/api.js";
 import { fetchSie4, type SieFile } from "../services/sie.js";
-import { ResponseFormat } from "../constants.js";
+import { ResponseFormat, SIE_HISTORY_MAX_YEARS } from "../constants.js";
 import {
   buildToolResponse,
   buildErrorResponse,
@@ -9,7 +9,9 @@ import {
 } from "../services/formatters.js";
 import {
   AccountTransactionsSchema,
-  type AccountTransactionsInput
+  CostCenterBalancesSchema,
+  type AccountTransactionsInput,
+  type CostCenterBalancesInput
 } from "../schemas/sie.js";
 
 // API response types
@@ -323,6 +325,237 @@ Examples:
           } else {
             lines.push("");
             lines.push("*No transactions found for the given filters.*");
+          }
+
+          textContent = lines.join("\n");
+        }
+
+        return buildToolResponse(textContent, output);
+      } catch (error) {
+        return buildErrorResponse(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "fortnox_cost_center_balances",
+    {
+      title: "Cost Center Balances (SIE)",
+      description: `Balance per cost center on one account at a given date, for reconciling settlement
+accounts (e.g. 1683) per cost center. Data comes from the Fortnox SIE type 4 export.
+
+Balances roll over between financial years, so the opening balance per cost center is taken from
+#OIB in the SIE file when Fortnox provides it. Otherwise all movements per cost center are summed
+from the earliest financial year (up to ${SIE_HISTORY_MAX_YEARS} years) forward; this is slower on the first call,
+after which SIE files are cached for about 5 minutes.
+
+The sum of all cost centers is always checked against the account's own balance (#IB plus movements).
+Any gap is reported as unexplained_difference instead of being hidden.
+
+Args:
+  - account (number): Account number, e.g. 1683
+  - as_of_date (string): Balance date, inclusive (YYYY-MM-DD)
+  - cost_center (string): Only return this cost center
+  - include_zero (boolean): Include cost centers with balance 0,00 (default: false)
+  - response_format ('markdown' | 'json'): Output format
+
+Returns:
+  Per cost center: opening balance for the financial year, movements from the start of the year to
+  as_of_date, balance, transaction count and last transaction date. Rows without cost center (and,
+  when balances are rolled forward, the earliest year's #IB, which cannot be split) are grouped as
+  cost_center=null. Plus account balance, method used and the reconciliation check.
+
+Examples:
+  - All cost centers on 1683 at 31 July 2026: account=1683, as_of_date="2026-07-31"
+  - One cost center: account=1683, as_of_date="2026-09-30", cost_center="670"`,
+      inputSchema: CostCenterBalancesSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: CostCenterBalancesInput) => {
+      try {
+        const yearsResponse = await fortnoxRequest<FinancialYearsResponse>("/3/financialyears");
+        const allYears = (yearsResponse.FinancialYears || [])
+          .filter((fy) => fy.FromDate <= params.as_of_date)
+          .sort((a, b) => a.FromDate.localeCompare(b.FromDate));
+        const currentYear = allYears.find((fy) => fy.ToDate >= params.as_of_date);
+        if (!currentYear) {
+          throw new Error(
+            `No Fortnox financial year covers ${params.as_of_date}. ` +
+            "Use fortnox_list_financial_years to see available years."
+          );
+        }
+
+        const currentFile = await fetchSie4(currentYear.Id);
+        const costCenterNames = new Map<string, string>();
+        const collectNames = (file: SieFile): void => {
+          const prefix = `${COST_CENTER_DIMENSION}:`;
+          for (const [key, name] of file.objects) {
+            if (key.startsWith(prefix)) costCenterNames.set(key.slice(prefix.length), name);
+          }
+        };
+
+        interface Balance {
+          openingOre: number;
+          movementOre: number;
+          count: number;
+          lastDate: string | null;
+        }
+        const balances = new Map<string | null, Balance>();
+        const balanceFor = (costCenter: string | null): Balance => {
+          let balance = balances.get(costCenter);
+          if (!balance) {
+            balance = { openingOre: 0, movementOre: 0, count: 0, lastDate: null };
+            balances.set(costCenter, balance);
+          }
+          return balance;
+        };
+
+        // Opening balance per cost center for the current financial year
+        const oibEntries = (currentFile.objectOpeningBalances.get(params.account) || [])
+          .filter((entry) => Object.keys(entry.objects).length === 1 && entry.objects[COST_CENTER_DIMENSION] !== undefined);
+
+        let method: "sie_oib" | "history";
+        let yearsRead = [currentYear];
+        let historyTruncated = false;
+
+        if (oibEntries.length > 0) {
+          method = "sie_oib";
+          for (const entry of oibEntries) {
+            balanceFor(entry.objects[COST_CENTER_DIMENSION]).openingOre += toOre(entry.amount);
+          }
+        } else {
+          method = "history";
+          let earlierYears = allYears.filter((fy) => fy.ToDate < currentYear.FromDate);
+          if (earlierYears.length + 1 > SIE_HISTORY_MAX_YEARS) {
+            historyTruncated = true;
+            earlierYears = earlierYears.slice(earlierYears.length - (SIE_HISTORY_MAX_YEARS - 1));
+          }
+          yearsRead = [...earlierYears, currentYear];
+
+          // The earliest year's #IB cannot be split per cost center
+          let first = true;
+          for (const fy of earlierYears) {
+            const file = await fetchSie4(fy.Id);
+            collectNames(file);
+            if (first) {
+              balanceFor(null).openingOre += toOre(file.openingBalances.get(params.account) ?? 0);
+              first = false;
+            }
+            for (const voucher of file.vouchers) {
+              for (const trans of voucher.transactions) {
+                if (trans.account !== params.account) continue;
+                const balance = balanceFor(trans.objects[COST_CENTER_DIMENSION] ?? null);
+                balance.openingOre += toOre(trans.amount);
+                if (!balance.lastDate || voucher.date > balance.lastDate) balance.lastDate = voucher.date;
+              }
+            }
+          }
+          if (first) {
+            balanceFor(null).openingOre += toOre(currentFile.openingBalances.get(params.account) ?? 0);
+          }
+        }
+        collectNames(currentFile);
+
+        // Movements in the current financial year up to as_of_date
+        for (const voucher of currentFile.vouchers) {
+          if (voucher.date > params.as_of_date) continue;
+          for (const trans of voucher.transactions) {
+            if (trans.account !== params.account) continue;
+            const balance = balanceFor(trans.objects[COST_CENTER_DIMENSION] ?? null);
+            balance.movementOre += toOre(trans.amount);
+            balance.count += 1;
+            if (!balance.lastDate || voucher.date > balance.lastDate) balance.lastDate = voucher.date;
+          }
+        }
+
+        // Reconcile the cost center split against the account balance
+        const accountOpeningOre = toOre(currentFile.openingBalances.get(params.account) ?? 0);
+        let movementTotalOre = 0;
+        let openingTotalOre = 0;
+        for (const balance of balances.values()) {
+          movementTotalOre += balance.movementOre;
+          openingTotalOre += balance.openingOre;
+        }
+        const accountBalanceOre = accountOpeningOre + movementTotalOre;
+        const differenceOre = accountOpeningOre - openingTotalOre;
+
+        const allCostCenters = Array.from(balances.entries())
+          .map(([costCenter, b]) => ({
+            cost_center: costCenter,
+            cost_center_name: costCenter !== null ? costCenterNames.get(costCenter) ?? null : null,
+            opening_balance: fromOre(b.openingOre),
+            movements: fromOre(b.movementOre),
+            balance: fromOre(b.openingOre + b.movementOre),
+            transaction_count: b.count,
+            last_transaction_date: b.lastDate
+          }))
+          .sort((a, b) => (a.cost_center ?? "").localeCompare(b.cost_center ?? "", undefined, { numeric: true }));
+
+        const costCenters = allCostCenters.filter((c) =>
+          (params.cost_center === undefined || c.cost_center === params.cost_center) &&
+          (params.include_zero || params.cost_center !== undefined || c.balance !== 0)
+        );
+
+        const output = {
+          account: params.account,
+          account_name: currentFile.accounts.get(params.account) ?? null,
+          as_of_date: params.as_of_date,
+          financial_year: {
+            id: currentYear.Id,
+            from_date: currentYear.FromDate,
+            to_date: currentYear.ToDate
+          },
+          method,
+          financial_years_read: yearsRead.map((fy) => fy.Id),
+          history_truncated: historyTruncated,
+          account_opening_balance: fromOre(accountOpeningOre),
+          account_balance: fromOre(accountBalanceOre),
+          sum_of_cost_centers: fromOre(openingTotalOre + movementTotalOre),
+          unexplained_difference: fromOre(differenceOre),
+          cost_center_count: costCenters.length,
+          cost_centers: costCenters
+        };
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.JSON) {
+          textContent = JSON.stringify(output, null, 2);
+        } else {
+          const lines: string[] = [
+            `# Cost Center Balances: Account ${params.account}${output.account_name ? ` ${output.account_name}` : ""}`,
+            "",
+            `**As of**: ${params.as_of_date} | **Financial Year**: ${currentYear.Id} (${currentYear.FromDate} to ${currentYear.ToDate})`,
+            `**Account Balance**: ${formatMoney(output.account_balance)} | **Sum of Cost Centers**: ${formatMoney(output.sum_of_cost_centers)}`,
+            `**Method**: ${method === "sie_oib" ? "#OIB from SIE" : `movements summed over financial years ${output.financial_years_read.join(", ")}`}`
+          ];
+
+          if (differenceOre !== 0) {
+            lines.push("");
+            lines.push(
+              `⚠️ **Unexplained difference**: ${formatMoney(output.unexplained_difference)}. The cost center opening balances do not add up to the account's #IB; ` +
+              "check year-end transfers or balances from before the earliest financial year."
+            );
+          }
+          if (historyTruncated) {
+            lines.push("");
+            lines.push(`⚠️ **Note**: Only the latest ${SIE_HISTORY_MAX_YEARS} financial years were read.`);
+          }
+
+          lines.push("");
+          if (costCenters.length > 0) {
+            lines.push("| Cost Center | Name | Opening Balance | Movements | Balance | Transactions | Last Transaction |");
+            lines.push("|-------------|------|-----------------|-----------|---------|--------------|------------------|");
+            for (const c of costCenters) {
+              lines.push(
+                `| ${c.cost_center ?? "(none)"} | ${c.cost_center_name || "-"} | ${formatMoney(c.opening_balance)} | ${formatMoney(c.movements)} | ${formatMoney(c.balance)} | ${c.transaction_count} | ${c.last_transaction_date || "-"} |`
+              );
+            }
+          } else {
+            lines.push("*No cost centers with a balance on this account.*");
           }
 
           textContent = lines.join("\n");

@@ -43,3 +43,32 @@ export const AccountTransactionsSchema = z.object({
 }).strict();
 
 export type AccountTransactionsInput = z.infer<typeof AccountTransactionsSchema>;
+
+/**
+ * Schema for cost center balances on one account at a given date
+ */
+export const CostCenterBalancesSchema = z.object({
+  account: z.coerce.number()
+    .int()
+    .min(1000)
+    .max(9999)
+    .describe("Account number to reconcile (1000-9999, required), e.g. 1683"),
+  as_of_date: z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format")
+    .describe("Balance date, inclusive (YYYY-MM-DD, required)"),
+  cost_center: z.coerce.string()
+    .min(1)
+    .max(20)
+    .optional()
+    .describe("Only return this cost center code (SIE dimension 1, e.g. '670')"),
+  include_zero: z.preprocess(
+    (value) => (value === "true" ? true : value === "false" ? false : value),
+    z.boolean().default(false)
+  )
+    .describe("Include cost centers whose balance is 0,00 (default: false)"),
+  response_format: z.nativeEnum(ResponseFormat)
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format: 'markdown' or 'json'")
+}).strict();
+
+export type CostCenterBalancesInput = z.infer<typeof CostCenterBalancesSchema>;

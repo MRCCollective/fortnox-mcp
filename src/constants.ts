@@ -35,3 +35,5 @@ export enum ResponseFormat {
 // so each financial year's parsed file is reused for a short window.
 export const SIE_CACHE_TTL_MS = 5 * 60 * 1000;
 export const SIE_CACHE_MAX_ENTRIES = 20;
+// Maximum number of financial years read when rolling cost center balances forward
+export const SIE_HISTORY_MAX_YEARS = 15;
