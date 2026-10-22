@@ -30,3 +30,8 @@ export enum ResponseFormat {
   MARKDOWN = "markdown",
   JSON = "json"
 }
+
+// SIE export cache: SIE files are large and change rarely within a session,
+// so each financial year's parsed file is reused for a short window.
+export const SIE_CACHE_TTL_MS = 5 * 60 * 1000;
+export const SIE_CACHE_MAX_ENTRIES = 20;

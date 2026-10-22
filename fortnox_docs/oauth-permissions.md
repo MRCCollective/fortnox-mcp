@@ -22,7 +22,7 @@ Select these eight permissions for the current tool surface:
 
 | Portal permission | OAuth scope | Used for |
 |---|---|---|
-| Bokföring | `bookkeeping` | Accounts, vouchers, voucher series, financial years |
+| Bokföring | `bookkeeping` | Accounts, vouchers, voucher series, financial years, SIE export (`/3/sie/4`) |
 | Företagsinformation | `companyinformation` | Company information |
 | Kostnadsställe | `costcenter` | Cost-center analytics |
 | Kund | `customer` | Customers |

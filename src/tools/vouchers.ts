@@ -471,7 +471,8 @@ Args:
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
-  Transactions matching the account criteria with optional summary.
+  Transactions matching the account criteria with optional summary. Each row includes
+  voucher series/number, cost center and project.
 
 Examples:
   - First call fortnox_list_financial_years to find that ID 4 = 2025
@@ -488,6 +489,14 @@ Examples:
     },
     async (params: AccountActivityInput) => {
       try {
+        if (
+          params.account_number === undefined &&
+          params.account_numbers === undefined &&
+          params.account_range === undefined
+        ) {
+          throw new Error("Must specify at least one of: account_number, account_numbers, or account_range");
+        }
+
         // Build account filter set
         const accountFilter = new Set<number>();
         if (params.account_number !== undefined) {
@@ -557,6 +566,8 @@ Examples:
           transaction_date: string;
           voucher_description: string;
           account: number;
+          cost_center: string | null;
+          project: string | null;
           description: string | null;
           debit: number;
           credit: number;
@@ -597,6 +608,8 @@ Examples:
                   transaction_date: voucher.TransactionDate,
                   voucher_description: voucher.Description,
                   account: row.Account,
+                  cost_center: row.CostCenter || null,
+                  project: row.Project || null,
                   description: row.Description || null,
                   debit: row.Debit || 0,
                   credit: row.Credit || 0
@@ -701,20 +714,20 @@ Examples:
             lines.push("");
             lines.push("## Transactions");
             lines.push("");
-            lines.push("| Date | Voucher | Account | Description | Debit | Credit |");
-            lines.push("|------|---------|---------|-------------|-------|--------|");
+            lines.push("| Date | Voucher | Account | Cost Center | Description | Debit | Credit |");
+            lines.push("|------|---------|---------|-------------|-------------|-------|--------|");
 
             const displayLimit = 100;
             const displayTransactions = matchingTransactions.slice(0, displayLimit);
 
             for (const t of displayTransactions) {
               lines.push(
-                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${t.description || t.voucher_description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
+                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${t.cost_center || "-"} | ${t.description || t.voucher_description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
               );
             }
 
             if (matchingTransactions.length > displayLimit) {
-              lines.push(`| ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
+              lines.push(`| ... | ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
             }
           } else {
             lines.push("");

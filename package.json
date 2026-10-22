@@ -16,6 +16,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "clean": "rm -rf dist",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build",
     "release": "./scripts/release.sh",
     "release:patch": "./scripts/release.sh patch",
