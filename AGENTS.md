@@ -114,7 +114,7 @@ When changing version metadata, inspect `package.json`, `server.json`, and the h
 
 ## Testing & QA
 
-Tests use Node's built-in `node:test` runner against the compiled `dist/` output (`tests/*.test.mjs`, run with `npm test`). Fortnox is faked by replacing `axios.defaults.adapter`; fixtures live in `tests/fixtures/`. No CI workflow, coverage tool, or coverage threshold is configured.
+Tests use Node's built-in `node:test` runner against the compiled `dist/` output (`tests/*.test.mjs`, run with `npm test`). Fortnox is faked by replacing `axios.defaults.adapter`; fixtures live in `tests/fixtures/`. `.github/workflows/deploy.yml` runs the suites before deploying `main`; no coverage tool or threshold is configured.
 
 For every change:
 
