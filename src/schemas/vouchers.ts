@@ -148,12 +148,24 @@ export type ListVoucherSeriesInput = z.infer<typeof ListVoucherSeriesSchema>;
  * and array arguments as strings (e.g. '{"from":3000,"to":3999}').
  */
 function parseJsonString(value: unknown): unknown {
+  if (value === null) return undefined;
   if (typeof value !== "string") return value;
+  if (value.trim() === "") return undefined;
   try {
     return JSON.parse(value);
   } catch {
     return value;
   }
+}
+
+/**
+ * Treat null and empty strings as "not given"; z.coerce.number() would turn
+ * them into 0 and e.g. send financialyear=0 to Fortnox.
+ */
+function blankToUndefined(value: unknown): unknown {
+  if (value === null) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  return value;
 }
 
 /**
@@ -175,11 +187,7 @@ function parseBooleanString(value: unknown): unknown {
  * the tool handler instead.
  */
 export const AccountActivitySchema = z.object({
-  account_number: z.coerce.number()
-    .int()
-    .min(1000)
-    .max(9999)
-    .optional()
+  account_number: z.preprocess(blankToUndefined, z.coerce.number().int().min(1000).max(9999).optional())
     .describe("Single account number to filter by (1000-9999)"),
   account_numbers: z.preprocess(
     parseJsonString,
@@ -198,9 +206,7 @@ export const AccountActivitySchema = z.object({
       .optional()
   )
     .describe("Account number range (e.g., { from: 3000, to: 3999 } for revenue accounts)"),
-  financial_year: z.coerce.number()
-    .int()
-    .optional()
+  financial_year: z.preprocess(blankToUndefined, z.coerce.number().int().min(1).optional())
     .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   period: DatePeriodEnum
     .optional()

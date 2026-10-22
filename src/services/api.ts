@@ -22,9 +22,11 @@ let requestTimestamps: number[] = [];
 async function waitForRateLimit(): Promise<void> {
   const now = Date.now();
 
-  // Remove timestamps outside the window
+  // Remove timestamps outside the window. Timestamps "in the future" (the
+  // clock moved backwards) are dropped too; otherwise they would never expire
+  // and every request would wait out the full clock jump.
   requestTimestamps = requestTimestamps.filter(
-    (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+    (ts) => ts <= now && now - ts < RATE_LIMIT_WINDOW_MS
   );
 
   // If at limit, wait for oldest request to expire
@@ -35,8 +37,9 @@ async function waitForRateLimit(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
     // Clean up again after waiting
+    const afterWait = Date.now();
     requestTimestamps = requestTimestamps.filter(
-      (ts) => Date.now() - ts < RATE_LIMIT_WINDOW_MS
+      (ts) => ts <= afterWait && afterWait - ts < RATE_LIMIT_WINDOW_MS
     );
   }
 

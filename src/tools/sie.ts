@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fortnoxRequest } from "../services/api.js";
-import { fetchSie4, type SieFile } from "../services/sie.js";
+import { assertSieIntegrity, fetchSie4, type SieFile } from "../services/sie.js";
 import { ResponseFormat, SIE_HISTORY_MAX_YEARS } from "../constants.js";
 import {
   buildToolResponse,
@@ -49,6 +49,51 @@ function previousDay(date: string): string {
 }
 
 /**
+ * Return the day after a YYYY-MM-DD date
+ */
+function nextDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Financial years must follow each other without gaps; a missing year in the
+ * middle would silently drop its transactions from totals and balances.
+ */
+function assertContiguousYears(years: FortnoxFinancialYear[]): void {
+  for (let i = 1; i < years.length; i++) {
+    if (years[i].FromDate !== nextDay(years[i - 1].ToDate)) {
+      throw new Error(
+        `Gap between Fortnox financial years ${years[i - 1].Id} (ends ${years[i - 1].ToDate}) and ` +
+        `${years[i].Id} (starts ${years[i].FromDate}); balances across the gap cannot be computed.`
+      );
+    }
+  }
+}
+
+/**
+ * Download, parse and verify the SIE file for one financial year
+ */
+async function loadSieYear(
+  fy: FortnoxFinancialYear,
+  refresh: boolean,
+  accounts: (account: number) => boolean
+): Promise<SieFile> {
+  const file = await fetchSie4(fy.Id, refresh);
+  assertSieIntegrity(file, { from: fy.FromDate, to: fy.ToDate }, accounts);
+  return file;
+}
+
+/**
+ * Oldest download time among the files used (data is at least this fresh)
+ */
+function oldestFetch(files: SieFile[]): string | null {
+  const times = files.map((f) => f.fetchedAt).filter((t): t is string => !!t).sort();
+  return times[0] ?? null;
+}
+
+/**
  * Register SIE-based bookkeeping tools
  */
 export function registerSieTools(server: McpServer): void {
@@ -69,6 +114,7 @@ Args:
   - from_date (string): Start date, inclusive (YYYY-MM-DD)
   - to_date (string): End date, inclusive (YYYY-MM-DD)
   - cost_center (string): Only rows on this cost center (SIE dimension 1)
+  - refresh (boolean): Bypass the SIE cache
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
@@ -76,7 +122,12 @@ Returns:
     debit positive / credit negative) and transaction text
   - totals_by_cost_center: sum and row count per cost center for the matching rows
   - opening_balance: per account, the financial year's #IB plus all movements from the start of the
-    year up to the day before from_date (all cost centers; SIE has no opening balance per cost center)
+    year up to the day before from_date. Always for ALL cost centers, even when cost_center is set;
+    use fortnox_cost_center_balances for one cost center's balance.
+  - sie_fetched_at: when the SIE data was downloaded (refresh=true bypasses the cache)
+
+Every SIE file is verified before use (right financial year, every voucher balances, #IB + transactions
+= #UB for the accounts involved). If a check fails the tool returns an error instead of numbers.
 
 Examples:
   - Account 1683, cost center 670, Aug-Sep 2026: account=1683, from_date="2026-08-01", to_date="2026-09-30", cost_center="670"
@@ -131,10 +182,11 @@ Examples:
             `(${years[0].FromDate} to ${years[years.length - 1].ToDate}).`
           );
         }
+        assertContiguousYears(years);
 
         const sieFiles: SieFile[] = [];
         for (const fy of years) {
-          sieFiles.push(await fetchSie4(fy.Id));
+          sieFiles.push(await loadSieYear(fy, params.refresh, accountMatches));
         }
 
         const accountNames = new Map<number, string>();
@@ -250,6 +302,7 @@ Examples:
           })),
           opening_balance: {
             as_of: previousDay(params.from_date),
+            scope: "all_cost_centers",
             total: fromOre(openingTotalOre),
             accounts: openingAccounts
           },
@@ -259,6 +312,7 @@ Examples:
             ? fromOre(openingTotalOre + totalOre)
             : null,
           totals_by_cost_center: totalsByCostCenter,
+          sie_fetched_at: oldestFetch(sieFiles),
           transactions
         };
 
@@ -281,7 +335,14 @@ Examples:
           }
           lines.push(`**Financial Years**: ${years.map((fy) => `${fy.Id} (${fy.FromDate} to ${fy.ToDate})`).join(", ")}`);
           lines.push(`**Opening Balance ${output.opening_balance.as_of}** (all cost centers): ${formatMoney(output.opening_balance.total)}`);
+          if (params.cost_center !== undefined) {
+            lines.push(
+              `*The opening balance covers the whole account, not cost center ${params.cost_center}. ` +
+              "Use fortnox_cost_center_balances for the cost center's own balance.*"
+            );
+          }
           lines.push(`**Transactions**: ${transactions.length} | **Period Total**: ${formatMoney(output.total_amount)}`);
+          lines.push(`**SIE data fetched**: ${output.sie_fetched_at ?? "-"}`);
 
           if (openingAccounts.length > 1) {
             lines.push("");
@@ -349,14 +410,17 @@ Balances roll over between financial years, so the opening balance per cost cent
 from the earliest financial year (up to ${SIE_HISTORY_MAX_YEARS} years) forward; this is slower on the first call,
 after which SIE files are cached for about 5 minutes.
 
-The sum of all cost centers is always checked against the account's own balance (#IB plus movements).
-Any gap is reported as unexplained_difference instead of being hidden.
+Every SIE file is verified before use (right financial year, every voucher balances, #IB + transactions
+= #UB for the account); a failed check returns an error instead of numbers. When rolling forward, the
+cost center split is also checked against the account's #IB and any gap is reported as
+unexplained_difference (null when #OIB is used, since the remainder is assigned to "no cost center").
 
 Args:
   - account (number): Account number, e.g. 1683
   - as_of_date (string): Balance date, inclusive (YYYY-MM-DD)
   - cost_center (string): Only return this cost center
   - include_zero (boolean): Include cost centers with balance 0,00 (default: false)
+  - refresh (boolean): Bypass the SIE cache
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
@@ -390,7 +454,9 @@ Examples:
           );
         }
 
-        const currentFile = await fetchSie4(currentYear.Id);
+        const isAccount = (account: number): boolean => account === params.account;
+        const currentFile = await loadSieYear(currentYear, params.refresh, isAccount);
+        const filesRead: SieFile[] = [currentFile];
         const costCenterNames = new Map<string, string>();
         const collectNames = (file: SieFile): void => {
           const prefix = `${COST_CENTER_DIMENSION}:`;
@@ -425,9 +491,15 @@ Examples:
 
         if (oibEntries.length > 0) {
           method = "sie_oib";
+          let oibTotalOre = 0;
           for (const entry of oibEntries) {
-            balanceFor(entry.objects[COST_CENTER_DIMENSION]).openingOre += toOre(entry.amount);
+            const ore = toOre(entry.amount);
+            balanceFor(entry.objects[COST_CENTER_DIMENSION]).openingOre += ore;
+            oibTotalOre += ore;
           }
+          // The part of #IB not covered by #OIB was booked without cost center
+          const remainderOre = toOre(currentFile.openingBalances.get(params.account) ?? 0) - oibTotalOre;
+          if (remainderOre !== 0) balanceFor(null).openingOre += remainderOre;
         } else {
           method = "history";
           let earlierYears = allYears.filter((fy) => fy.ToDate < currentYear.FromDate);
@@ -436,11 +508,13 @@ Examples:
             earlierYears = earlierYears.slice(earlierYears.length - (SIE_HISTORY_MAX_YEARS - 1));
           }
           yearsRead = [...earlierYears, currentYear];
+          assertContiguousYears(yearsRead);
 
           // The earliest year's #IB cannot be split per cost center
           let first = true;
           for (const fy of earlierYears) {
-            const file = await fetchSie4(fy.Id);
+            const file = await loadSieYear(fy, params.refresh, isAccount);
+            filesRead.push(file);
             collectNames(file);
             if (first) {
               balanceFor(null).openingOre += toOre(file.openingBalances.get(params.account) ?? 0);
@@ -482,6 +556,7 @@ Examples:
           openingTotalOre += balance.openingOre;
         }
         const accountBalanceOre = accountOpeningOre + movementTotalOre;
+        // Only meaningful when rolling forward: with #OIB the remainder is assigned to "no cost center"
         const differenceOre = accountOpeningOre - openingTotalOre;
 
         const allCostCenters = Array.from(balances.entries())
@@ -516,7 +591,8 @@ Examples:
           account_opening_balance: fromOre(accountOpeningOre),
           account_balance: fromOre(accountBalanceOre),
           sum_of_cost_centers: fromOre(openingTotalOre + movementTotalOre),
-          unexplained_difference: fromOre(differenceOre),
+          unexplained_difference: method === "history" ? fromOre(differenceOre) : null,
+          sie_fetched_at: oldestFetch(filesRead),
           cost_center_count: costCenters.length,
           cost_centers: costCenters
         };
@@ -530,13 +606,14 @@ Examples:
             "",
             `**As of**: ${params.as_of_date} | **Financial Year**: ${currentYear.Id} (${currentYear.FromDate} to ${currentYear.ToDate})`,
             `**Account Balance**: ${formatMoney(output.account_balance)} | **Sum of Cost Centers**: ${formatMoney(output.sum_of_cost_centers)}`,
-            `**Method**: ${method === "sie_oib" ? "#OIB from SIE" : `movements summed over financial years ${output.financial_years_read.join(", ")}`}`
+            `**Method**: ${method === "sie_oib" ? "#OIB from SIE (opening balance not covered by #OIB is shown without cost center)" : `movements summed over financial years ${output.financial_years_read.join(", ")}`}`,
+            `**SIE data fetched**: ${output.sie_fetched_at ?? "-"}`
           ];
 
-          if (differenceOre !== 0) {
+          if (method === "history" && differenceOre !== 0) {
             lines.push("");
             lines.push(
-              `⚠️ **Unexplained difference**: ${formatMoney(output.unexplained_difference)}. The cost center opening balances do not add up to the account's #IB; ` +
+              `⚠️ **Unexplained difference**: ${formatMoney(fromOre(differenceOre))}. The cost center opening balances do not add up to the account's #IB; ` +
               "check year-end transfers or balances from before the earliest financial year."
             );
           }

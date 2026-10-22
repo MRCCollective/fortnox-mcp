@@ -357,7 +357,7 @@ test("fortnox_cost_center_balances rolls balances forward from earlier years", a
   }
 });
 
-test("fortnox_cost_center_balances uses #OIB and reports unexplained differences", async () => {
+test("fortnox_cost_center_balances uses #OIB and puts the uncovered #IB on no cost center", async () => {
   clearSieCache();
   const mock = mockFortnox({
     11: withObjectOpeningBalances([
@@ -379,10 +379,12 @@ test("fortnox_cost_center_balances uses #OIB and reports unexplained differences
     assert.equal(output.method, "sie_oib");
     assert.deepEqual(output.financial_years_read, [11]);
     assert.equal(output.account_balance, -239101.6);
-    assert.equal(output.unexplained_difference, -1000);
+    // #IB -250000 minus #OIB -249000 leaves -1000 booked without cost center
+    assert.equal(output.unexplained_difference, null);
+    assert.equal(output.sum_of_cost_centers, output.account_balance);
     assert.deepEqual(
-      output.cost_centers.map((c) => [c.cost_center, c.balance]),
-      [["670", -18000], ["680", -220101.6]],
+      output.cost_centers.map((c) => [c.cost_center, c.opening_balance, c.balance]),
+      [[null, -1000, -1000], ["670", -30000, -18000], ["680", -219000, -220101.6]],
     );
     // Only FY 11 was downloaded
     assert.deepEqual(mock.requests.filter((r) => r.path === "/3/sie/4").map((r) => r.params.financialyear), [11]);
@@ -391,7 +393,8 @@ test("fortnox_cost_center_balances uses #OIB and reports unexplained differences
       name: "fortnox_cost_center_balances",
       arguments: { account: 1683, as_of_date: "2026-07-31" },
     });
-    assert.match(markdown.content[0].text, /Unexplained difference\*\*: [−-]1\s000,00 SEK/);
+    assert.match(markdown.content[0].text, /#OIB from SIE \(opening balance not covered by #OIB is shown without cost center\)/);
+    assert.doesNotMatch(markdown.content[0].text, /Unexplained difference/);
 
     const missing = await client.callTool({
       name: "fortnox_cost_center_balances",
@@ -399,6 +402,144 @@ test("fortnox_cost_center_balances uses #OIB and reports unexplained differences
     });
     assert.equal(missing.isError, true);
     assert.match(missing.content[0].text, /No Fortnox financial year covers 2030-01-01/);
+  } finally {
+    mock.restore();
+    await client.close();
+  }
+});
+
+/**
+ * Edit the FY 2026 fixture as text (latin1 keeps the PC8 bytes intact)
+ */
+function editFixture(fixture, edit) {
+  return Buffer.from(edit(fixture.toString("latin1")), "latin1");
+}
+
+test("SIE tools refuse files that are not the requested year or fail integrity checks", async () => {
+  const cases = [
+    // Fortnox ignores the year parameter and returns the current year
+    [{ 10: sieFixture, 11: sieFixture }, { account: 1683, as_of_date: "2025-06-30" }, /wrong financial year: expected 2025-01-01 to 2025-12-31, got 2026-01-01 to 2026-12-31/],
+    // A body that is not SIE at all
+    [{ 11: Buffer.from(JSON.stringify({ ok: true })) }, { account: 1683, as_of_date: "2026-07-31" }, /did not return a SIE type 4 file/],
+    // An unbalanced voucher
+    [{ 11: editFixture(sieFixture, (t) => t.replace("#TRANS 2440 {} 798.14", "#TRANS 2440 {} 798.15")) }, { account: 1683, as_of_date: "2026-07-31" }, /SIE voucher D57 \(2026-08-12\) does not balance \(difference 0.01\)/],
+    // A row lost in parsing (e.g. #RTRANS not repeated as #TRANS) shows up as #IB + transactions != #UB
+    [{ 11: editFixture(sieFixture, (t) => t.replace('   #TRANS 1683 {1 "670"} -798.14\r\n', '   #RTRANS 1683 {1 "670"} -798.14\r\n').replace("#TRANS 2440 {} 798.14", "#TRANS 2440 {} 0.00")) }, { account: 1683, as_of_date: "2026-07-31" }, /integrity check failed for account 1683/],
+    // A malformed amount must not be parsed leniently
+    [{ 11: editFixture(sieFixture, (t) => t.replace("#TRANS 1930 {} -500.00", "#TRANS 1930 {} -500,00")) }, { account: 1683, as_of_date: "2026-07-31" }, /Invalid SIE amount "-500,00"/],
+  ];
+
+  for (const [sieByYear, args, pattern] of cases) {
+    clearSieCache();
+    const mock = mockFortnox(sieByYear);
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({ name: "fortnox_cost_center_balances", arguments: args });
+      assert.equal(result.isError, true, `expected error for ${pattern}`);
+      assert.match(result.content[0].text, pattern);
+    } finally {
+      mock.restore();
+      await client.close();
+    }
+  }
+});
+
+test("account_transactions refuses ranges across a missing financial year", async () => {
+  clearSieCache();
+  const originalYears = financialYears.FinancialYears;
+  financialYears.FinancialYears = [
+    { Id: 9, FromDate: "2024-01-01", ToDate: "2024-12-31" },
+    { Id: 11, FromDate: "2026-01-01", ToDate: "2026-12-31" },
+  ];
+  const mock = mockFortnox();
+  const client = await connectClient();
+  try {
+    const result = await client.callTool({
+      name: "fortnox_account_transactions",
+      arguments: { account: 1683, from_date: "2024-06-01", to_date: "2026-06-30" },
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /Gap between Fortnox financial years 9 \(ends 2024-12-31\) and 11/);
+  } finally {
+    financialYears.FinancialYears = originalYears;
+    mock.restore();
+    await client.close();
+  }
+});
+
+test("history roll-forward reports a broken #IB chain as unexplained difference", async () => {
+  clearSieCache();
+  // FY 2026 #IB no longer equals FY 2025 #IB + movements (-250000)
+  const broken = editFixture(sieFixture, (t) => t
+    .replace("#IB 0 1683 -250000.00", "#IB 0 1683 -251000.00")
+    .replace("#UB 0 1683 -237695.04", "#UB 0 1683 -238695.04"));
+  const mock = mockFortnox({ 10: sieFixture2025, 11: broken });
+  const client = await connectClient();
+  try {
+    const result = await client.callTool({
+      name: "fortnox_cost_center_balances",
+      arguments: { account: 1683, as_of_date: "2026-07-31", response_format: "json" },
+    });
+    assert.notEqual(result.isError, true, result.content?.[0]?.text);
+    assert.equal(result.structuredContent.unexplained_difference, -1000);
+    assert.equal(result.structuredContent.account_balance, -240101.6);
+
+    const markdown = await client.callTool({
+      name: "fortnox_cost_center_balances",
+      arguments: { account: 1683, as_of_date: "2026-07-31" },
+    });
+    assert.match(markdown.content[0].text, /Unexplained difference\*\*: [−-]1\s000,00 SEK/);
+  } finally {
+    mock.restore();
+    await client.close();
+  }
+});
+
+test("blank and null arguments are treated as not given, invalid dates are rejected", async () => {
+  clearSieCache();
+  const mock = mockFortnox({ 10: sieFixture2025, 11: sieFixture });
+  const client = await connectClient();
+  try {
+    const nullCostCenter = await client.callTool({
+      name: "fortnox_account_transactions",
+      arguments: { account: 1683, from_date: "2026-08-01", to_date: "2026-09-30", cost_center: null, response_format: "json" },
+    });
+    assert.notEqual(nullCostCenter.isError, true, nullCostCenter.content?.[0]?.text);
+    assert.equal(nullCostCenter.structuredContent.filter.cost_center, null);
+    assert.equal(nullCostCenter.structuredContent.transaction_count, 6);
+
+    const padded = await client.callTool({
+      name: "fortnox_cost_center_balances",
+      arguments: { account: " 1683 ", as_of_date: "2026-07-31", cost_center: " 670 ", response_format: "json" },
+    });
+    assert.notEqual(padded.isError, true, padded.content?.[0]?.text);
+    assert.deepEqual(padded.structuredContent.cost_centers.map((c) => c.cost_center), ["670"]);
+
+    const badDate = await client.callTool({
+      name: "fortnox_account_transactions",
+      arguments: { account: 1683, from_date: "2026-02-30", to_date: "2026-03-31" },
+    });
+    assert.equal(badDate.isError, true);
+    assert.match(badDate.content[0].text, /valid calendar date/);
+  } finally {
+    mock.restore();
+    await client.close();
+  }
+});
+
+test("refresh bypasses the SIE cache and output says when data was fetched", async () => {
+  clearSieCache();
+  const mock = mockFortnox({ 10: sieFixture2025, 11: sieFixture });
+  const client = await connectClient();
+  try {
+    const args = { account: 1683, as_of_date: "2026-07-31", response_format: "json" };
+    const first = await client.callTool({ name: "fortnox_cost_center_balances", arguments: args });
+    await client.callTool({ name: "fortnox_cost_center_balances", arguments: args });
+    assert.equal(mock.requests.filter((r) => r.path === "/3/sie/4").length, 2);
+    assert.match(first.structuredContent.sie_fetched_at, /^\d{4}-\d{2}-\d{2}T/);
+
+    await client.callTool({ name: "fortnox_cost_center_balances", arguments: { ...args, refresh: true } });
+    assert.equal(mock.requests.filter((r) => r.path === "/3/sie/4").length, 4);
   } finally {
     mock.restore();
     await client.close();

@@ -605,6 +605,8 @@ Examples:
         }> = [];
 
         const accountSummary = new Map<number, { debit: number; credit: number; count: number }>();
+        // Vouchers whose details could not be fetched; their rows are missing from the totals
+        const failedVouchers: string[] = [];
 
         // Process vouchers in batches of 10
         const batchSize = 10;
@@ -621,6 +623,7 @@ Examples:
               const detail = await fortnoxRequest<VoucherResponse>(detailEndpoint, "GET", undefined, detailParams);
               return detail.Voucher;
             } catch {
+              failedVouchers.push(`${v.VoucherSeries}${v.VoucherNumber}`);
               return null;
             }
           });
@@ -695,6 +698,7 @@ Examples:
           total_vouchers_available: totalVouchers,
           truncated: result.truncated,
           truncation_reason: result.truncationReason,
+          failed_voucher_fetches: failedVouchers,
           matching_transactions: matchingTransactions.length,
           summary: summaryArray,
           transactions: matchingTransactions
@@ -725,6 +729,13 @@ Examples:
           if (result.truncated) {
             lines.push("");
             lines.push(`⚠️ **Note**: ${result.truncationReason}`);
+          }
+          if (failedVouchers.length > 0) {
+            lines.push("");
+            lines.push(
+              `⚠️ **Incomplete**: ${failedVouchers.length} voucher(s) could not be fetched and are missing from the totals: ` +
+              failedVouchers.slice(0, 20).join(", ") + (failedVouchers.length > 20 ? ", ..." : "")
+            );
           }
 
           if (summaryArray && summaryArray.length > 0) {

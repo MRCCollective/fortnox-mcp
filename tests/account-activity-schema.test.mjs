@@ -192,3 +192,73 @@ test("voucher tools ignore rows Fortnox marks as Removed", async () => {
     await client.close();
   }
 });
+
+test("fortnox_account_activity reports vouchers it could not fetch instead of hiding them", async () => {
+  const originalAdapter = axios.defaults.adapter;
+  axios.defaults.adapter = async (config) => {
+    const path = new URL(config.url).pathname;
+    const respond = (data) => ({ config, status: 200, statusText: "OK", headers: {}, data });
+    if (path === "/3/vouchers") {
+      return respond({
+        Vouchers: [
+          { VoucherSeries: "B", VoucherNumber: 1, Description: "OK", TransactionDate: "2026-08-01" },
+          { VoucherSeries: "B", VoucherNumber: 2, Description: "Broken", TransactionDate: "2026-08-02" },
+        ],
+        MetaInformation: { "@TotalResources": 2 },
+      });
+    }
+    if (path === "/3/vouchers/B/1") {
+      return respond({
+        Voucher: {
+          VoucherSeries: "B", VoucherNumber: 1, Year: 11, Description: "OK", TransactionDate: "2026-08-01",
+          VoucherRows: [{ Account: 1683, Debit: 100 }, { Account: 1930, Credit: 100 }],
+        },
+      });
+    }
+    throw new axios.AxiosError("Server error", "ERR_BAD_RESPONSE", config, null, {
+      config, status: 500, statusText: "Error", headers: {}, data: {},
+    });
+  };
+
+  const client = await connectClient();
+  try {
+    const json = await client.callTool({
+      name: "fortnox_account_activity",
+      arguments: { account_number: 1683, financial_year: 11, max_vouchers: 10, response_format: "json" },
+    });
+    assert.deepEqual(json.structuredContent.failed_voucher_fetches, ["B2"]);
+    assert.equal(json.structuredContent.matching_transactions, 1);
+
+    const markdown = await client.callTool({
+      name: "fortnox_account_activity",
+      arguments: { account_number: 1683, financial_year: 11, max_vouchers: 10 },
+    });
+    assert.match(markdown.content[0].text, /Incomplete\*\*: 1 voucher\(s\) could not be fetched and are missing from the totals: B2/);
+  } finally {
+    axios.defaults.adapter = originalAdapter;
+    await client.close();
+  }
+});
+
+test("every tool publishes a typed input schema without $ref", async () => {
+  const server = createFortnoxMcpServer("read-write");
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  await client.connect(clientTransport);
+  try {
+    const { tools } = await client.listTools();
+    const problems = [];
+    for (const tool of tools) {
+      if (JSON.stringify(tool.inputSchema).includes("$ref")) problems.push(`${tool.name}: uses $ref`);
+      for (const [name, prop] of Object.entries(tool.inputSchema.properties || {})) {
+        if (prop.type === undefined && prop.enum === undefined && prop.anyOf === undefined) {
+          problems.push(`${tool.name}.${name}: no type`);
+        }
+      }
+    }
+    assert.deepEqual(problems, []);
+  } finally {
+    await client.close();
+  }
+});

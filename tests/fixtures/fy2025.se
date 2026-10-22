@@ -13,6 +13,8 @@
 #KONTO 1683 "™vriga kortfristiga fordringar"
 #KONTO 1930 "F”retagskonto"
 #IB 0 1683 -200000.00
+#UB 0 1683 -250000.00
+#UB 0 1930 50000.00
 #VER "B" "10" 20250210 "Kundfaktura Gammal kund (5001)" 20250210
 {
    #TRANS 1683 {1 "670"} -30000.00

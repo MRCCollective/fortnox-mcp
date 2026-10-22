@@ -39,6 +39,8 @@ export interface SieVoucher {
  * Parsed SIE type 4 file (only the parts used by the tools)
  */
 export interface SieFile {
+  /** #SIETYP value, e.g. "4" */
+  sieType: string | null;
   /** Current financial year (#RAR 0) */
   financialYear: { from: string; to: string } | null;
   /** #KONTO account names */
@@ -47,9 +49,13 @@ export interface SieFile {
   objects: Map<string, string>;
   /** #IB 0 opening balances for the current financial year */
   openingBalances: Map<number, number>;
+  /** #UB 0 closing balances for the current financial year */
+  closingBalances: Map<number, number>;
   /** #OIB 0 opening balances per account and object list (e.g. per cost center) */
   objectOpeningBalances: Map<number, Array<{ objects: Record<string, string>; amount: number }>>;
   vouchers: SieVoucher[];
+  /** When the file was downloaded from Fortnox (ISO timestamp), set by fetchSie4 */
+  fetchedAt?: string;
 }
 
 /**
@@ -141,12 +147,84 @@ export function parseSieObjectList(token: string | undefined): Record<string, st
  */
 function sieDate(value: string | undefined): string | null {
   if (!value || !/^\d{8}$/.test(value)) return null;
-  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  const date = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  return isValidIsoDate(date) ? date : null;
 }
 
-function sieAmount(value: string | undefined): number {
-  const amount = Number.parseFloat(value ?? "");
-  return Number.isFinite(amount) ? amount : 0;
+/**
+ * True for a real calendar date in YYYY-MM-DD form (rejects e.g. 2026-02-30)
+ */
+export function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Integrity checks on a parsed SIE file. Throws instead of letting a
+ * malformed or unexpected export produce plausible but wrong balances:
+ * - the file must be SIE type 4 for exactly the requested financial year
+ * - every voucher must balance (sum of #TRANS = 0)
+ * - for each checked account, #IB + all movements must equal #UB
+ */
+export function assertSieIntegrity(
+  file: SieFile,
+  expectedYear: { from: string; to: string },
+  accounts: (account: number) => boolean
+): void {
+  if (file.sieType !== "4") {
+    throw new Error(`Fortnox did not return a SIE type 4 file (got #SIETYP ${file.sieType ?? "missing"}).`);
+  }
+  if (!file.financialYear || file.financialYear.from !== expectedYear.from || file.financialYear.to !== expectedYear.to) {
+    const got = file.financialYear ? `${file.financialYear.from} to ${file.financialYear.to}` : "no #RAR 0";
+    throw new Error(
+      `Fortnox returned SIE data for the wrong financial year: expected ${expectedYear.from} to ${expectedYear.to}, got ${got}.`
+    );
+  }
+
+  const movements = new Map<number, number>();
+  for (const voucher of file.vouchers) {
+    let voucherOre = 0;
+    for (const trans of voucher.transactions) {
+      const ore = Math.round(trans.amount * 100);
+      voucherOre += ore;
+      if (accounts(trans.account)) {
+        movements.set(trans.account, (movements.get(trans.account) || 0) + ore);
+      }
+    }
+    if (voucherOre !== 0) {
+      throw new Error(
+        `SIE voucher ${voucher.series}${voucher.number} (${voucher.date}) does not balance ` +
+        `(difference ${(voucherOre / 100).toFixed(2)}). Balances would be unreliable.`
+      );
+    }
+  }
+
+  const checked = new Set<number>([...movements.keys()]);
+  for (const account of [...file.openingBalances.keys(), ...file.closingBalances.keys()]) {
+    if (accounts(account)) checked.add(account);
+  }
+  for (const account of checked) {
+    const expectedOre = Math.round((file.closingBalances.get(account) ?? 0) * 100);
+    const actualOre = Math.round((file.openingBalances.get(account) ?? 0) * 100) + (movements.get(account) || 0);
+    if (expectedOre !== actualOre) {
+      throw new Error(
+        `SIE integrity check failed for account ${account}: #IB + transactions = ${(actualOre / 100).toFixed(2)} ` +
+        `but #UB = ${(expectedOre / 100).toFixed(2)}. Some transactions may be missing from the parse.`
+      );
+    }
+  }
+}
+
+/**
+ * Parse a SIE amount strictly ("-1234.50"). Anything else is a parse error:
+ * a lenient parse (e.g. "-1,50" -> -1) would silently change balances.
+ */
+function sieAmount(value: string | undefined, line: string): number {
+  if (value === undefined || !/^-?\d+(\.\d+)?$/.test(value)) {
+    throw new Error(`Invalid SIE amount "${value ?? ""}" in line: ${line}`);
+  }
+  return Number.parseFloat(value);
 }
 
 /**
@@ -156,10 +234,12 @@ function sieAmount(value: string | undefined): number {
  */
 export function parseSie(content: string): SieFile {
   const file: SieFile = {
+    sieType: null,
     financialYear: null,
     accounts: new Map(),
     objects: new Map(),
     openingBalances: new Map(),
+    closingBalances: new Map(),
     objectOpeningBalances: new Map(),
     vouchers: []
   };
@@ -181,6 +261,10 @@ export function parseSie(content: string): SieFile {
     const label = tokens[0].toUpperCase();
 
     switch (label) {
+      case "#SIETYP": {
+        file.sieType = tokens[1] ?? null;
+        break;
+      }
       case "#RAR": {
         if (tokens[1] === "0") {
           const from = sieDate(tokens[2]);
@@ -201,7 +285,14 @@ export function parseSie(content: string): SieFile {
       case "#IB": {
         if (tokens[1] === "0") {
           const account = Number.parseInt(tokens[2], 10);
-          if (Number.isFinite(account)) file.openingBalances.set(account, sieAmount(tokens[3]));
+          if (Number.isFinite(account)) file.openingBalances.set(account, sieAmount(tokens[3], line));
+        }
+        break;
+      }
+      case "#UB": {
+        if (tokens[1] === "0") {
+          const account = Number.parseInt(tokens[2], 10);
+          if (Number.isFinite(account)) file.closingBalances.set(account, sieAmount(tokens[3], line));
         }
         break;
       }
@@ -210,16 +301,20 @@ export function parseSie(content: string): SieFile {
           const account = Number.parseInt(tokens[2], 10);
           if (!Number.isFinite(account)) break;
           const entries = file.objectOpeningBalances.get(account) || [];
-          entries.push({ objects: parseSieObjectList(tokens[3]), amount: sieAmount(tokens[4]) });
+          entries.push({ objects: parseSieObjectList(tokens[3]), amount: sieAmount(tokens[4], line) });
           file.objectOpeningBalances.set(account, entries);
         }
         break;
       }
       case "#VER": {
+        const date = sieDate(tokens[3]);
+        if (!date) {
+          throw new Error(`Invalid SIE voucher date "${tokens[3] ?? ""}" in line: ${line}`);
+        }
         currentVoucher = {
           series: tokens[1] ?? "",
           number: tokens[2] ?? "",
-          date: sieDate(tokens[3]) ?? "",
+          date,
           text: tokens[4] || null,
           transactions: []
         };
@@ -233,7 +328,7 @@ export function parseSie(content: string): SieFile {
         currentVoucher.transactions.push({
           account,
           objects: parseSieObjectList(tokens[2]),
-          amount: sieAmount(tokens[3]),
+          amount: sieAmount(tokens[3], line),
           date: sieDate(tokens[4]),
           text: tokens[5] || null
         });
@@ -265,14 +360,15 @@ export function clearSieCache(): void {
 /**
  * Fetch and parse the SIE type 4 export for a Fortnox financial year.
  * Results are cached per user and financial year for SIE_CACHE_TTL_MS;
- * concurrent callers share the same in-flight request.
+ * concurrent callers share the same in-flight request. refresh=true bypasses
+ * the cache (e.g. right after booking a correction).
  */
-export async function fetchSie4(financialYearId: number): Promise<SieFile> {
+export async function fetchSie4(financialYearId: number, refresh = false): Promise<SieFile> {
   const key = `${getCurrentUserId() ?? "local"}:${financialYearId}`;
   const now = Date.now();
 
   const cached = sieCache.get(key);
-  if (cached && cached.expiresAt > now) {
+  if (!refresh && cached && cached.expiresAt > now) {
     return cached.file;
   }
   sieCache.delete(key);
@@ -284,7 +380,11 @@ export async function fetchSie4(financialYearId: number): Promise<SieFile> {
     { financialyear: financialYearId },
     undefined,
     { responseType: "arraybuffer", accept: "*/*" }
-  ).then((data) => parseSie(decodeSie(new Uint8Array(data))));
+  ).then((data) => {
+    const parsed = parseSie(decodeSie(new Uint8Array(data)));
+    parsed.fetchedAt = new Date(now).toISOString();
+    return parsed;
+  });
 
   sieCache.set(key, { expiresAt: now + SIE_CACHE_TTL_MS, file });
   file.catch(() => {
