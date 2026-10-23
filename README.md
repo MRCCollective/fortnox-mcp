@@ -112,6 +112,8 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 - `fortnox_create_voucher` - Create manual voucher
 - `fortnox_list_voucher_series` - List available voucher series
 - `fortnox_account_activity` - Get activity for a specific account
+- `fortnox_account_transactions` - All transactions on an account/range between two dates, with cost center, voucher series/number, totals per cost center and opening balance (from the SIE 4 export)
+- `fortnox_cost_center_balances` - Balance per cost center on one account at a date (e.g. 1683 reconciliation), rolled forward across financial years and checked against the account balance
 - `fortnox_search_vouchers` - Search vouchers by description, account, or amount
 
 ### Company Information

@@ -22,6 +22,7 @@ import { registerAnalyticsTools } from "../tools/analytics.js";
 import { registerSupplierInvoiceTools } from "../tools/supplierInvoices.js";
 import { registerOrderTools } from "../tools/orders.js";
 import { registerBIAnalyticsTools } from "../tools/biAnalytics.js";
+import { registerSieTools } from "../tools/sie.js";
 
 interface ToolConfig<
   InputArgs extends undefined | ZodRawShapeCompat | AnySchema,
@@ -77,6 +78,7 @@ export function createFortnoxMcpServer(accessMode: McpAccessMode): McpServer {
   registerAnalyticsTools(server);
   registerOrderTools(server);
   registerBIAnalyticsTools(server);
+  registerSieTools(server);
 
   return server;
 }

@@ -250,7 +250,9 @@ export const ExpenseAnalysisSchema = z.object({
   group_by: z.enum(["account", "account_class"])
     .default("account_class")
     .describe("Group expenses by individual account or account class (e.g., 4xxx, 5xxx)"),
-  compare_to: DatePeriodEnum
+  // A fresh enum instance: reusing DatePeriodEnum twice in one schema makes the
+  // published JSON schema emit an untyped "$ref" for this field
+  compare_to: z.enum(DatePeriodEnum.options)
     .optional()
     .describe("Optional period to compare against"),
   response_format: z.nativeEnum(ResponseFormat)

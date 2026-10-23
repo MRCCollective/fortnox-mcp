@@ -33,6 +33,8 @@ interface FortnoxVoucherRow {
   Description?: string;
   CostCenter?: string;
   Project?: string;
+  /** True for rows corrected away after registration; they no longer affect any balance */
+  Removed?: boolean;
 }
 
 interface FortnoxVoucher {
@@ -51,6 +53,14 @@ interface FortnoxVoucherListItem {
   Description: string;
   TransactionDate: string;
   "@url"?: string;
+}
+
+/**
+ * Rows that still count in the bookkeeping. Fortnox keeps corrected rows on the
+ * voucher with Removed=true; summing them double counts the corrected amount.
+ */
+function activeRows(voucher: FortnoxVoucher): FortnoxVoucherRow[] {
+  return (voucher.VoucherRows || []).filter((row) => !row.Removed);
 }
 
 interface VoucherListResponse {
@@ -213,7 +223,15 @@ Returns:
           year: voucher.Year,
           description: voucher.Description,
           transaction_date: voucher.TransactionDate,
-          rows: (voucher.VoucherRows || []).map((row) => ({
+          rows: activeRows(voucher).map((row) => ({
+            account_number: row.Account,
+            debit: row.Debit || 0,
+            credit: row.Credit || 0,
+            description: row.Description || null,
+            cost_center: row.CostCenter || null,
+            project: row.Project || null
+          })),
+          removed_rows: (voucher.VoucherRows || []).filter((row) => row.Removed).map((row) => ({
             account_number: row.Account,
             debit: row.Debit || 0,
             credit: row.Credit || 0,
@@ -243,7 +261,7 @@ Returns:
           let totalDebit = 0;
           let totalCredit = 0;
 
-          for (const row of voucher.VoucherRows || []) {
+          for (const row of activeRows(voucher)) {
             totalDebit += row.Debit || 0;
             totalCredit += row.Credit || 0;
             lines.push(
@@ -252,6 +270,19 @@ Returns:
           }
 
           lines.push(`| **Total** | | **${formatMoney(totalDebit)}** | **${formatMoney(totalCredit)}** |`);
+
+          if (output.removed_rows.length > 0) {
+            lines.push("");
+            lines.push("## Removed Rows (corrected, not included in totals)");
+            lines.push("");
+            lines.push("| Account | Description | Debit | Credit |");
+            lines.push("|---------|-------------|-------|--------|");
+            for (const row of output.removed_rows) {
+              lines.push(
+                `| ${row.account_number} | ${row.description || "-"} | ${formatMoney(row.debit)} | ${formatMoney(row.credit)} |`
+              );
+            }
+          }
 
           textContent = lines.join("\n");
         }
@@ -471,7 +502,8 @@ Args:
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
-  Transactions matching the account criteria with optional summary.
+  Transactions matching the account criteria with optional summary. Each row includes
+  voucher series/number, cost center and project.
 
 Examples:
   - First call fortnox_list_financial_years to find that ID 4 = 2025
@@ -488,6 +520,14 @@ Examples:
     },
     async (params: AccountActivityInput) => {
       try {
+        if (
+          params.account_number === undefined &&
+          params.account_numbers === undefined &&
+          params.account_range === undefined
+        ) {
+          throw new Error("Must specify at least one of: account_number, account_numbers, or account_range");
+        }
+
         // Build account filter set
         const accountFilter = new Set<number>();
         if (params.account_number !== undefined) {
@@ -557,12 +597,16 @@ Examples:
           transaction_date: string;
           voucher_description: string;
           account: number;
+          cost_center: string | null;
+          project: string | null;
           description: string | null;
           debit: number;
           credit: number;
         }> = [];
 
         const accountSummary = new Map<number, { debit: number; credit: number; count: number }>();
+        // Vouchers whose details could not be fetched; their rows are missing from the totals
+        const failedVouchers: string[] = [];
 
         // Process vouchers in batches of 10
         const batchSize = 10;
@@ -579,6 +623,7 @@ Examples:
               const detail = await fortnoxRequest<VoucherResponse>(detailEndpoint, "GET", undefined, detailParams);
               return detail.Voucher;
             } catch {
+              failedVouchers.push(`${v.VoucherSeries}${v.VoucherNumber}`);
               return null;
             }
           });
@@ -587,9 +632,9 @@ Examples:
 
           // Process results
           for (const voucher of details) {
-            if (!voucher || !voucher.VoucherRows) continue;
+            if (!voucher) continue;
 
-            for (const row of voucher.VoucherRows) {
+            for (const row of activeRows(voucher)) {
               if (accountMatches(row.Account)) {
                 matchingTransactions.push({
                   voucher_series: voucher.VoucherSeries,
@@ -597,6 +642,8 @@ Examples:
                   transaction_date: voucher.TransactionDate,
                   voucher_description: voucher.Description,
                   account: row.Account,
+                  cost_center: row.CostCenter || null,
+                  project: row.Project || null,
                   description: row.Description || null,
                   debit: row.Debit || 0,
                   credit: row.Credit || 0
@@ -651,6 +698,7 @@ Examples:
           total_vouchers_available: totalVouchers,
           truncated: result.truncated,
           truncation_reason: result.truncationReason,
+          failed_voucher_fetches: failedVouchers,
           matching_transactions: matchingTransactions.length,
           summary: summaryArray,
           transactions: matchingTransactions
@@ -682,6 +730,13 @@ Examples:
             lines.push("");
             lines.push(`⚠️ **Note**: ${result.truncationReason}`);
           }
+          if (failedVouchers.length > 0) {
+            lines.push("");
+            lines.push(
+              `⚠️ **Incomplete**: ${failedVouchers.length} voucher(s) could not be fetched and are missing from the totals: ` +
+              failedVouchers.slice(0, 20).join(", ") + (failedVouchers.length > 20 ? ", ..." : "")
+            );
+          }
 
           if (summaryArray && summaryArray.length > 0) {
             lines.push("");
@@ -701,20 +756,20 @@ Examples:
             lines.push("");
             lines.push("## Transactions");
             lines.push("");
-            lines.push("| Date | Voucher | Account | Description | Debit | Credit |");
-            lines.push("|------|---------|---------|-------------|-------|--------|");
+            lines.push("| Date | Voucher | Account | Cost Center | Description | Debit | Credit |");
+            lines.push("|------|---------|---------|-------------|-------------|-------|--------|");
 
             const displayLimit = 100;
             const displayTransactions = matchingTransactions.slice(0, displayLimit);
 
             for (const t of displayTransactions) {
               lines.push(
-                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${t.description || t.voucher_description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
+                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${t.cost_center || "-"} | ${t.description || t.voucher_description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
               );
             }
 
             if (matchingTransactions.length > displayLimit) {
-              lines.push(`| ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
+              lines.push(`| ... | ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
             }
           } else {
             lines.push("");
@@ -866,7 +921,7 @@ Examples:
               if (!voucher) continue;
 
               const descriptionMatch = textMatches(voucher.Description);
-              const rowMatch = voucher.VoucherRows?.some(row => textMatches(row.Description));
+              const rowMatch = activeRows(voucher).some(row => textMatches(row.Description));
 
               if (descriptionMatch || rowMatch) {
                 matchingVouchers.push({
@@ -875,7 +930,7 @@ Examples:
                   transaction_date: voucher.TransactionDate,
                   description: voucher.Description,
                   matched_in: descriptionMatch ? "description" : "row",
-                  rows: voucher.VoucherRows?.map(row => ({
+                  rows: activeRows(voucher).map(row => ({
                     account: row.Account,
                     description: row.Description || null,
                     debit: row.Debit || 0,

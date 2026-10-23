@@ -1,0 +1,71 @@
+#FLAGGA 0
+#PROGRAM "Fortnox" 3.0
+#FORMAT PC8
+#GEN 20261022
+#SIETYP 4
+#FNAMN "Testbolaget AB"
+#RAR 0 20260101 20261231
+#RAR -1 20250101 20251231
+#KPTYP BAS2014
+#DIM 1 "Kostnadsst„lle"
+#DIM 6 "Projekt"
+#OBJEKT 1 "670" "F”rs„ljning Norden"
+#OBJEKT 1 "680" "™vrigt"
+#KONTO 1683 "™vriga kortfristiga fordringar"
+#KONTO 1930 "F”retagskonto"
+#KONTO 2440 "Leverant”rsskulder"
+#IB 0 1683 -250000.00
+#IB -1 1683 -180000.00
+#IB 0 1930 125000.00
+#UB 0 1683 -237695.04
+#UB 0 1930 111896.90
+#UB 0 2440 798.14
+#VER "A" "12" 20260315 "Omf”ring \"mars\"" 20260316
+{
+   #TRANS 1683 {1 "670"} 12000.00 20260315 "Omf”ring mars"
+   #TRANS 1930 {} -12000.00
+}
+#VER "C" "88" 20260620 "Kundbet Malm” AB (6001)" 20260620
+{
+   #TRANS 1683 {1 "680" 6 "P1"} -1101.60
+   #TRANS 1930 {} 1101.60
+}
+#VER "C" "141" 20260804 "Kundbet Reform Furniture NUF (6296)" 20260805
+{
+   #TRANS 1930 {} -7582.36
+   #TRANS 1683 {1 "670"} 7582.36 20260804 "Reform Furniture"
+}
+#VER "D" "57" 20260812 "Levfakt 2802" 20260812
+{
+   #TRANS 2440 {} 798.14
+   #TRANS 1683 {1 "670"} -798.14
+}
+#VER "B" "203" 20260818 "Kundfaktura Collectia AS (6586)" 20260818
+{
+   #TRANS 1683 {1 "670"} -6877.65
+   #TRANS 1930 {} 6877.65
+}
+#VER "C" "150" 20260825 "Kundbet Annan kund (6590)" 20260825
+{
+   #TRANS 1683 {1 "680"} 500.00
+   #TRANS 1930 {} -500.00
+}
+#VER "B" "219" 20260905 "Kundfaktura Collectia AS (6627)" 20260905
+{
+   #TRANS 1683 {1 "670"} -6877.65
+   #TRANS 1930 {} 6877.65
+   #BTRANS 1683 {1 "670"} -1000.00 20260905 "Borttagen rad" 0 "Anna"
+   #RTRANS 1930 {} 1000.00 20260905 "Tillagd rad" 0 "Anna"
+   #TRANS 1930 {} 1000.00 20260905 "Tillagd rad"
+   #TRANS 1930 {} -1000.00
+}
+#VER "B" "236" 20260922 "Kreditfaktura (6738)" 20260922
+{
+   #TRANS 1683 {1 "670"} 6877.65
+   #TRANS 1930 {} -6877.65
+}
+#VER "A" "31" 20261005 "Oktober" 20261005
+{
+   #TRANS 1683 {1 "670"} 999.99
+   #TRANS 1930 {} -999.99
+}

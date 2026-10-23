@@ -56,10 +56,11 @@ TRANSPORT=http PORT=3000 npm run dev # local HTTP mode; requires valid Fortnox a
 npm run build                       # strict TypeScript compile, src/ -> dist/
 npm start                           # run compiled dist/index.js; build first
 npm run clean                       # remove dist/
+npm test                            # build, then run node:test suites in tests/
 npx tsx scripts/get-token.ts        # interactive OAuth helper on localhost:8888
 ```
 
-There is no `npm test`, lint, format, or standalone typecheck script. `npm run build` is the configured compile gate.
+There is no lint, format, or standalone typecheck script. `npm run build` is the compile gate; `npm test` builds and runs the `node:test` suites.
 
 Do not run `npm run release*` during normal development. `scripts/release.sh` changes versions, commits, tags, publishes to npm and the MCP Registry, and pushes Git refs. It requires a clean tree plus external npm and `mcp-publisher` authentication.
 
@@ -113,7 +114,7 @@ When changing version metadata, inspect `package.json`, `server.json`, and the h
 
 ## Testing & QA
 
-No automated unit/integration test framework, test files, CI workflow, coverage tool, or coverage threshold is configured. The ignored `coverage/` directory does not imply an active coverage policy.
+Tests use Node's built-in `node:test` runner against the compiled `dist/` output (`tests/*.test.mjs`, run with `npm test`). Fortnox is faked by replacing `axios.defaults.adapter`; fixtures live in `tests/fixtures/`. `.github/workflows/deploy.yml` runs the suites before deploying `main`; no coverage tool or threshold is configured.
 
 For every change:
 

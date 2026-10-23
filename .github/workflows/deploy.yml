@@ -31,8 +31,8 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test MCP request isolation
-        run: node --test tests/remote-concurrency.test.mjs
+      - name: Test
+        run: node --test tests/*.test.mjs
 
       - name: Prune dev dependencies
         run: npm prune --omit=dev

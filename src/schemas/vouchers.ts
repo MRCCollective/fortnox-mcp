@@ -144,28 +144,69 @@ export const ListVoucherSeriesSchema = z.object({
 export type ListVoucherSeriesInput = z.infer<typeof ListVoucherSeriesSchema>;
 
 /**
+ * Parse JSON-encoded strings before validation. Some MCP clients send object
+ * and array arguments as strings (e.g. '{"from":3000,"to":3999}').
+ */
+function parseJsonString(value: unknown): unknown {
+  if (value === null) return undefined;
+  if (typeof value !== "string") return value;
+  if (value.trim() === "") return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Treat null and empty strings as "not given"; z.coerce.number() would turn
+ * them into 0 and e.g. send financialyear=0 to Fortnox.
+ */
+function blankToUndefined(value: unknown): unknown {
+  if (value === null) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  return value;
+}
+
+/**
+ * Accept "true"/"false" strings for booleans. z.coerce.boolean() would turn
+ * "false" into true, so strings are mapped explicitly.
+ */
+function parseBooleanString(value: unknown): unknown {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}
+
+/**
  * Schema for account activity tool - filter vouchers by account number
+ *
+ * Kept as a plain z.object() (no top-level .refine()): the MCP SDK only
+ * publishes properties for object schemas, so a ZodEffects wrapper results in
+ * an empty inputSchema. The "at least one account filter" rule is enforced in
+ * the tool handler instead.
  */
 export const AccountActivitySchema = z.object({
-  account_number: z.number()
-    .int()
-    .min(1000)
-    .max(9999)
-    .optional()
+  account_number: z.preprocess(blankToUndefined, z.coerce.number().int().min(1000).max(9999).optional())
     .describe("Single account number to filter by (1000-9999)"),
-  account_numbers: z.array(z.number().int().min(1000).max(9999))
-    .max(20)
-    .optional()
+  account_numbers: z.preprocess(
+    parseJsonString,
+    z.array(z.coerce.number().int().min(1000).max(9999))
+      .max(20)
+      .optional()
+  )
     .describe("Multiple account numbers to filter by (max 20)"),
-  account_range: z.object({
-    from: z.number().int().min(1000).max(9999),
-    to: z.number().int().min(1000).max(9999)
-  })
-    .optional()
-    .describe("Account number range (e.g., 3000-3999 for revenue accounts)"),
-  financial_year: z.number()
-    .int()
-    .optional()
+  account_range: z.preprocess(
+    parseJsonString,
+    z.object({
+      from: z.coerce.number().int().min(1000).max(9999).describe("First account in the range"),
+      to: z.coerce.number().int().min(1000).max(9999).describe("Last account in the range")
+    })
+      .strict()
+      .optional()
+  )
+    .describe("Account number range (e.g., { from: 3000, to: 3999 } for revenue accounts)"),
+  financial_year: z.preprocess(blankToUndefined, z.coerce.number().int().min(1).optional())
     .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   period: DatePeriodEnum
     .optional()
@@ -182,10 +223,9 @@ export const AccountActivitySchema = z.object({
     .max(2)
     .optional()
     .describe("Filter by voucher series (e.g., 'A', 'B')"),
-  include_summary: z.boolean()
-    .default(true)
+  include_summary: z.preprocess(parseBooleanString, z.boolean().default(true))
     .describe("Include totals and summary per account"),
-  max_vouchers: z.number()
+  max_vouchers: z.coerce.number()
     .int()
     .min(10)
     .max(500)
@@ -194,10 +234,7 @@ export const AccountActivitySchema = z.object({
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")
-}).strict().refine(
-  (data) => data.account_number !== undefined || data.account_numbers !== undefined || data.account_range !== undefined,
-  { message: "Must specify at least one of: account_number, account_numbers, or account_range" }
-);
+}).strict();
 
 export type AccountActivityInput = z.infer<typeof AccountActivitySchema>;
 

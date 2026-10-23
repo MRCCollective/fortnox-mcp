@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosRequestConfig } from "axios";
+import axios, { AxiosError, AxiosRequestConfig, ResponseType } from "axios";
 import { getTokenProvider } from "../auth/index.js";
 import { getCurrentUserId } from "../auth/context.js";
 import { assertFortnoxRequestAllowed } from "../accessMode.js";
@@ -22,9 +22,11 @@ let requestTimestamps: number[] = [];
 async function waitForRateLimit(): Promise<void> {
   const now = Date.now();
 
-  // Remove timestamps outside the window
+  // Remove timestamps outside the window. Timestamps "in the future" (the
+  // clock moved backwards) are dropped too; otherwise they would never expire
+  // and every request would wait out the full clock jump.
   requestTimestamps = requestTimestamps.filter(
-    (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+    (ts) => ts <= now && now - ts < RATE_LIMIT_WINDOW_MS
   );
 
   // If at limit, wait for oldest request to expire
@@ -35,12 +37,23 @@ async function waitForRateLimit(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
     // Clean up again after waiting
+    const afterWait = Date.now();
     requestTimestamps = requestTimestamps.filter(
-      (ts) => Date.now() - ts < RATE_LIMIT_WINDOW_MS
+      (ts) => ts <= afterWait && afterWait - ts < RATE_LIMIT_WINDOW_MS
     );
   }
 
   requestTimestamps.push(Date.now());
+}
+
+/**
+ * Optional transport settings for non-JSON endpoints (e.g. SIE file export)
+ */
+export interface FortnoxRequestOptions {
+  /** Axios response type (default: "json") */
+  responseType?: ResponseType;
+  /** Accept header (default: "application/json") */
+  accept?: string;
 }
 
 /**
@@ -52,7 +65,8 @@ export async function fortnoxRequest<T>(
   method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
   data?: unknown,
   params?: Record<string, string | number | boolean | undefined>,
-  timeoutMs: number = GLOBAL_REQUEST_TIMEOUT_MS
+  timeoutMs: number = GLOBAL_REQUEST_TIMEOUT_MS,
+  options: FortnoxRequestOptions = {}
 ): Promise<T> {
   assertFortnoxRequestAllowed(method);
   await waitForRateLimit();
@@ -80,9 +94,10 @@ export async function fortnoxRequest<T>(
     headers: {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      "Accept": "application/json"
+      "Accept": options.accept ?? "application/json"
     },
     timeout: timeoutMs,
+    responseType: options.responseType,
     params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined,
     data
   };
@@ -96,6 +111,22 @@ export async function fortnoxRequest<T>(
 }
 
 /**
+ * Binary requests (responseType "arraybuffer") receive error bodies as raw
+ * bytes; decode them so Fortnox error messages are still surfaced.
+ */
+function decodeErrorBody(data: unknown): any {
+  if (!(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) return data;
+  const text = ArrayBuffer.isView(data)
+    ? Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8")
+    : Buffer.from(data).toString("utf8");
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
  * Handle API errors with descriptive messages
  */
 export function handleApiError(error: unknown, context?: string): Error {
@@ -103,7 +134,7 @@ export function handleApiError(error: unknown, context?: string): Error {
 
   if (error instanceof AxiosError) {
     const status = error.response?.status;
-    const data = error.response?.data;
+    const data = decodeErrorBody(error.response?.data);
 
     // Extract Fortnox-specific error message
     const fortnoxError = data?.ErrorInformation?.message ||
